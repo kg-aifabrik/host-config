@@ -18,6 +18,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `.github/dependabot.yml` configured for pip/GHA/Docker weekly updates. (M0-5)
 - Issue templates (`layer-task`, `gate-test`, `bug`, `design-discussion`), `PULL_REQUEST_TEMPLATE.md`, `CODEOWNERS`. (M0-5)
 
+- HostIntent Pydantic models + error hierarchy. `src/host_config/models/` exposes `PhysIface`, `BondMember`, `Bond`, `SriovParent`, `RoceUnderlay`, `VlanChild`, `VlanRole`, `HostIntent`, `Role`, plus the `MacAddress` validated type. `src/host_config/errors.py` and `src/host_config/models/errors.py` establish the typed exception hierarchy (`HostConfigError` → `ModelError` → `InvariantError`). Ten cross-field invariants enforce host-level rules (one default gateway, MTU monotonicity, RoCE count per role, etc.). 89 unit tests, 98% line + branch coverage. (M2-1, #11)
+
 ### Deferred
 
 - **Branch protection** on `main`. GitHub's branch protection API is gated behind paid plans for private repos; until the repo is on a paid plan (or goes public), the rules are enforced by local discipline (CONTRIBUTING.md). M7.5-1 revisits when the constraint changes. (M0-5)
