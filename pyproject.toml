@@ -1,0 +1,109 @@
+[project]
+name = "host-config"
+version = "0.0.0"
+description = "Host network configuration pipeline: Netbox-driven intent rendered to Netplan + cloud-init."
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+authors = [{ name = "Karthik Gajjala", email = "kg@aifabrik.com" }]
+
+# Runtime dependencies are added by subsequent milestones as code lands.
+dependencies = []
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/host_config"]
+
+[dependency-groups]
+dev = [
+    "pre-commit>=4.0",
+    "ruff>=0.7",
+    "mypy>=1.13",
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+    "pytest-cov>=6.0",
+]
+
+# ---------------------------------------------------------------------------
+# ruff: lint + format. See ADR-0004.
+# ---------------------------------------------------------------------------
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "tests", "fixtures"]
+
+[tool.ruff.lint]
+# Curated ruleset per CODE_CONVENTIONS.md §5:
+#   E   pycodestyle errors
+#   F   pyflakes
+#   I   isort
+#   UP  pyupgrade
+#   B   flake8-bugbear
+#   S   flake8-bandit (security)
+#   RUF Ruff-specific
+#   PL  pylint
+#   TID tidy imports
+#   SIM flake8-simplify
+select = ["E", "F", "I", "UP", "B", "S", "RUF", "PL", "TID", "SIM"]
+ignore = [
+    # Too many args is fine when callers use named params; signal-to-noise low.
+    "PLR0913",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests legitimately use `assert`, magic numbers, and looser security checks.
+"tests/**" = ["S101", "PLR2004"]
+"fixtures/**" = ["S101"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "lf"
+
+# ---------------------------------------------------------------------------
+# mypy: strict. See ADR-0004.
+# ---------------------------------------------------------------------------
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_unreachable = true
+warn_unused_ignores = true
+show_error_codes = true
+files = ["src", "tests", "fixtures"]
+
+# Allow missing import stubs for third-party packages until stubs are added.
+[[tool.mypy.overrides]]
+module = ["pynetbox.*", "ruamel.*"]
+ignore_missing_imports = true
+
+# ---------------------------------------------------------------------------
+# pytest. See ADR-0005.
+# ---------------------------------------------------------------------------
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+markers = [
+    "fast: unit tests with no I/O",
+    "slow: component/integration tests requiring containers",
+    "e2e: end-to-end tests requiring full lab",
+    "requires_kvm: tests that need KVM acceleration",
+]
+addopts = "--strict-markers --strict-config -ra"
+
+# ---------------------------------------------------------------------------
+# Coverage. See CODE_CONVENTIONS §6.
+# ---------------------------------------------------------------------------
+[tool.coverage.run]
+source = ["src/host_config"]
+branch = true
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "raise NotImplementedError",
+    "if TYPE_CHECKING:",
+    "if __name__ == .__main__.:",
+]
+show_missing = true

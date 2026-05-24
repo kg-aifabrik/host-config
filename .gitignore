@@ -1,0 +1,42 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# --- venv ---
+.venv/
+venv/
+env/
+
+# --- uv ---
+.uv/
+
+# --- Test + coverage ---
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+.coverage.*
+coverage.xml
+
+# --- Editors / IDE ---
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# --- Local secrets ---
+.env
+.envrc
+
+# --- Cloud images + VM artifacts ---
+fixtures/vms/images/
+*.qcow2
+*.iso
+
+# --- OS noise ---
+.DS_Store
+Thumbs.db

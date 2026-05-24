@@ -1,0 +1,21 @@
+# Normalize line endings across platforms.
+* text=auto eol=lf
+
+# Source files are LF only.
+*.py text eol=lf
+*.md text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+*.toml text eol=lf
+*.sh text eol=lf
+*.svg text eol=lf
+*.j2 text eol=lf
+
+# Binary files.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.qcow2 binary
+*.iso binary
+*.pdf binary

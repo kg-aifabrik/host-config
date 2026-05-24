@@ -1,0 +1,27 @@
+root = true
+
+[*]
+end_of_line = lf
+charset = utf-8
+indent_style = space
+indent_size = 4
+trim_trailing_whitespace = true
+insert_final_newline = true
+
+# YAML/JSON conventionally use 2-space indent.
+[*.{yaml,yml,json}]
+indent_size = 2
+
+# Markdown trailing whitespace can be meaningful (line break).
+[*.md]
+trim_trailing_whitespace = false
+
+# Makefile requires literal tabs.
+[Makefile]
+indent_style = tab
+
+# justfile recipes are tab-indented in the underlying convention; spaces work
+# but tabs are the lower-friction default with the just CLI.
+[justfile]
+indent_style = space
+indent_size = 4
