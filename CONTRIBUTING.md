@@ -12,27 +12,28 @@
 
 ## Branch policy
 
-- **Trunk-based**: feature branches off `main`, squash-merge back.
-- **Branch naming**: `<type>/<short-slug>` where type is `feat`, `fix`, `docs`, `chore`, `refactor`, `test`. Examples: `feat/m2-1-host-intent-models`, `docs/runbook-do-deploy`.
+The repo is currently a **solo-dev project**. Commits land **directly on `main`** — no feature branches, no PRs, no review ceremony. When a second contributor joins, this is the first convention to revisit (via a new ADR).
+
+- **No feature branches in v1.** Work straight on `main`.
 - **Force-pushes to `main` are blocked** by branch protection (M0-5).
+- **Linear history** required (set by branch protection); no merge commits.
 
 ## Commit conventions
 
 - [Conventional Commits](https://www.conventionalcommits.org/) format, enforced by a `commit-msg` pre-commit hook.
 - Allowed types: `feat`, `fix`, `docs`, `test`, `refactor`, `chore`, `ci`, `perf`, `build`.
-- Body required for non-trivial changes; reference the linked issue (`Closes #N`).
-- Squash-merge preserves the PR title as the squashed commit message — write PR titles in the same format.
+- Body required for non-trivial changes; reference the linked issue with `Closes #N` so it auto-closes.
+- **No commit signing.** Repo is private; access-controlled at the GitHub layer.
 
-## Pull request flow
+## Workflow per issue
 
-1. Open the issue (or claim an existing one).
-2. Create a feature branch.
-3. Implement; add tests; update docs/ADR if relevant.
-4. Push; open the PR with the issue linked in the description.
-5. Wait for CI; address any failures.
-6. **Self-review trivial PRs** (docs typos, dependency bumps, generated files). **Substantive PRs** get a deliberate "looks good" review comment before merge.
-7. Squash-merge.
-8. Issue auto-closes via `Closes #N` in the PR description.
+1. Claim the issue (assign yourself).
+2. Run `just lint && just typecheck && just test` to confirm a green starting point.
+3. Implement; add tests for any new code; update docstring/README/ADR if relevant.
+4. Run `just lint && just typecheck && just test` again — all must pass.
+5. Commit with a Conventional Commit message containing `Closes #N`.
+6. `git push origin main`.
+7. Issue auto-closes; CI runs on the push and is the final gate.
 
 ## Definition of done
 
@@ -41,7 +42,7 @@
 - Coverage does not regress meaningfully (>2% drop triggers review per CODE_CONVENTIONS §6).
 - Public-facing changes update docstring/README/ADR where relevant.
 - CHANGELOG entry generated via Conventional Commit type.
-- Merged to `main`.
+- Pushed to `main`; CI green.
 
 ## Working with issues and milestones
 
