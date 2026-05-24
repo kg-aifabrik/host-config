@@ -43,3 +43,9 @@ These mirror the palette established in the companion research repo's diagrams s
 ## Why Excalidraw
 
 Per ADR-0008: GitHub-rendered Markdown is the documentation system; no build step. Excalidraw produces SVG that embeds inline, and the JSON source diffs cleanly so review of a diagram change is meaningful. No proprietary format, no online-only dependency for viewing (exported SVG is self-contained).
+
+## Seed diagrams (no Excalidraw source yet)
+
+The initial set of diagrams landed in M0-4 (`systems-overview.svg`, `render-flow.svg`) was hand-authored in SVG for compactness — no `.excalidraw` source files exist for them yet. The first time someone needs to edit one, import the SVG into [excalidraw.com](https://excalidraw.com), make the edit, save the `.excalidraw` source alongside the SVG, re-export, commit both. From that point forward the diagram follows the standard workflow above.
+
+This is a one-time exception for seed diagrams. New diagrams must be authored in Excalidraw from the start.

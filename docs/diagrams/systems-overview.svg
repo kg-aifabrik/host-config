@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 540" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif">
+  <title>host-config systems overview</title>
+  <desc>Component diagram: Netbox, renderer service, nginx cache, target VM with cloud-init, OVS bridge. Shows the request flow at first boot.</desc>
+
+  <!-- Title -->
+  <text x="480" y="35" text-anchor="middle" font-size="22" font-weight="600" fill="#1e1e1e">host-config — systems overview</text>
+  <text x="480" y="60" text-anchor="middle" font-size="13" fill="#868e96">Components and the first-boot render flow</text>
+
+  <!-- Definitions: arrowhead -->
+  <defs>
+    <marker id="arrowhead" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+      <polygon points="0 0, 10 3, 0 6" fill="#495057"/>
+    </marker>
+  </defs>
+
+  <!-- Netbox (left) -->
+  <rect x="50" y="200" width="180" height="100" rx="6" fill="#dee2e6" stroke="#495057" stroke-width="2"/>
+  <text x="140" y="235" text-anchor="middle" font-size="15" font-weight="600" fill="#1e1e1e">Netbox</text>
+  <text x="140" y="258" text-anchor="middle" font-size="11" fill="#495057">Source of truth</text>
+  <text x="140" y="275" text-anchor="middle" font-size="11" fill="#495057">devices, IPs, VLANs,</text>
+  <text x="140" y="290" text-anchor="middle" font-size="11" fill="#495057">custom fields</text>
+
+  <!-- Renderer (middle) -->
+  <rect x="310" y="180" width="220" height="140" rx="6" fill="#d0ebff" stroke="#1864ab" stroke-width="2"/>
+  <text x="420" y="210" text-anchor="middle" font-size="15" font-weight="600" fill="#1864ab">Renderer service</text>
+  <text x="420" y="232" text-anchor="middle" font-size="11" fill="#1864ab">FastAPI</text>
+  <text x="420" y="252" text-anchor="middle" font-size="11" fill="#1864ab">Pydantic HostIntent</text>
+  <text x="420" y="270" text-anchor="middle" font-size="11" fill="#1864ab">Jinja templates → bytes</text>
+  <text x="420" y="293" text-anchor="middle" font-size="11" fill="#1864ab">structlog · /metrics</text>
+  <text x="420" y="311" text-anchor="middle" font-size="10" font-style="italic" fill="#495057">/v1/render/{asset}/...</text>
+
+  <!-- nginx cache (right of renderer) -->
+  <rect x="610" y="200" width="180" height="100" rx="6" fill="#fff3bf" stroke="#e67700" stroke-width="2"/>
+  <text x="700" y="235" text-anchor="middle" font-size="15" font-weight="600" fill="#e67700">nginx cache</text>
+  <text x="700" y="258" text-anchor="middle" font-size="11" fill="#e67700">proxy_cache_path</text>
+  <text x="700" y="275" text-anchor="middle" font-size="11" fill="#e67700">write-through, 5m TTL</text>
+  <text x="700" y="290" text-anchor="middle" font-size="11" fill="#e67700">PURGE for invalidation</text>
+
+  <!-- Target host (right edge) -->
+  <rect x="610" y="380" width="290" height="120" rx="6" fill="#f8f9fa" stroke="#495057" stroke-width="2" stroke-dasharray="6 4"/>
+  <text x="755" y="408" text-anchor="middle" font-size="14" font-weight="600" fill="#1e1e1e">Target host (Tier 1: QEMU VM)</text>
+
+  <rect x="630" y="425" width="120" height="55" rx="4" fill="#b2f2bb" stroke="#2b8a3e" stroke-width="1.5"/>
+  <text x="690" y="448" text-anchor="middle" font-size="12" font-weight="600" fill="#2b8a3e">cloud-init</text>
+  <text x="690" y="465" text-anchor="middle" font-size="10" fill="#2b8a3e">NoCloud datasource</text>
+
+  <rect x="765" y="425" width="120" height="55" rx="4" fill="#ffe3e3" stroke="#c92a2a" stroke-width="1.5"/>
+  <text x="825" y="448" text-anchor="middle" font-size="12" font-weight="600" fill="#c92a2a">Netplan</text>
+  <text x="825" y="465" text-anchor="middle" font-size="10" fill="#c92a2a">systemd-networkd</text>
+
+  <!-- OVS bridge -->
+  <rect x="50" y="430" width="430" height="60" rx="6" fill="#e7f5ff" stroke="#1971c2" stroke-width="2" stroke-dasharray="4 4"/>
+  <text x="265" y="455" text-anchor="middle" font-size="13" font-weight="600" fill="#1971c2">OVS bridge (LACP partner + VLAN trunk 100/200/300)</text>
+  <text x="265" y="475" text-anchor="middle" font-size="11" font-style="italic" fill="#495057">test-time only; in production this is the real switch fabric</text>
+
+  <!-- Fixture loader -->
+  <rect x="50" y="90" width="200" height="50" rx="6" fill="#f8f9fa" stroke="#868e96" stroke-width="1.5"/>
+  <text x="150" y="113" text-anchor="middle" font-size="12" font-weight="600" fill="#495057">Fixture loader (Python)</text>
+  <text x="150" y="130" text-anchor="middle" font-size="10" fill="#868e96">populates Netbox on first apply</text>
+
+  <!-- Ansible -->
+  <rect x="380" y="90" width="200" height="50" rx="6" fill="#f8f9fa" stroke="#868e96" stroke-width="1.5"/>
+  <text x="480" y="113" text-anchor="middle" font-size="12" font-weight="600" fill="#495057">Ansible (deploy-lab.yml)</text>
+  <text x="480" y="130" text-anchor="middle" font-size="10" fill="#868e96">provisions + configures host</text>
+
+  <!-- Arrows: Renderer ↔ Netbox -->
+  <line x1="305" y1="250" x2="235" y2="250" stroke="#495057" stroke-width="2" marker-end="url(#arrowhead)"/>
+  <text x="270" y="240" text-anchor="middle" font-size="10" fill="#495057">query</text>
+
+  <!-- Arrows: nginx → Renderer (cache miss) -->
+  <line x1="605" y1="250" x2="535" y2="250" stroke="#495057" stroke-width="2" marker-end="url(#arrowhead)"/>
+  <text x="570" y="240" text-anchor="middle" font-size="10" fill="#495057">cache miss</text>
+
+  <!-- Arrows: VM cloud-init → nginx -->
+  <line x1="690" y1="425" x2="690" y2="305" stroke="#495057" stroke-width="2" marker-end="url(#arrowhead)"/>
+  <text x="715" y="370" text-anchor="middle" font-size="10" fill="#495057">HTTP GET</text>
+  <text x="700" y="385" text-anchor="middle" font-size="9" font-style="italic" fill="#868e96">$mac substituted in URL</text>
+
+  <!-- Arrows: Netplan → OVS -->
+  <line x1="825" y1="485" x2="480" y2="460" stroke="#495057" stroke-width="2" stroke-dasharray="6 4"/>
+  <text x="540" y="510" text-anchor="middle" font-size="10" fill="#495057">applies bond + VLANs</text>
+
+  <!-- Arrows: Fixture → Netbox -->
+  <line x1="150" y1="145" x2="140" y2="195" stroke="#868e96" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+
+  <!-- Arrows: Ansible deploys renderer + nginx -->
+  <line x1="450" y1="145" x2="400" y2="180" stroke="#868e96" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+  <line x1="510" y1="145" x2="650" y2="200" stroke="#868e96" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+
+  <!-- Legend / note at bottom -->
+  <text x="480" y="525" text-anchor="middle" font-size="10" font-style="italic" fill="#868e96">Solid arrows: request-time data flow.   Dashed arrows: deploy-time provisioning.</text>
+</svg>

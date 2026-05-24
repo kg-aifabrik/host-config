@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 620" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif">
+  <title>host-config canonical render flow</title>
+  <desc>Sequence diagram: cloud-init in a target VM fetches a seed from nginx; on cache miss the renderer queries Netbox, builds a HostIntent, renders, and returns. Cache populated for the next request.</desc>
+
+  <!-- Title -->
+  <text x="480" y="35" text-anchor="middle" font-size="22" font-weight="600" fill="#1e1e1e">Canonical render flow</text>
+  <text x="480" y="58" text-anchor="middle" font-size="13" fill="#868e96">First request (cache miss) — second request would short-circuit at nginx</text>
+
+  <!-- Arrowhead -->
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+      <polygon points="0 0, 10 3, 0 6" fill="#495057"/>
+    </marker>
+    <marker id="arrowBlue" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+      <polygon points="0 0, 10 3, 0 6" fill="#1864ab"/>
+    </marker>
+  </defs>
+
+  <!-- Lifelines (vertical lanes) -->
+  <!-- 4 actors at x=120, 360, 600, 840 -->
+
+  <!-- Actor boxes -->
+  <rect x="60" y="80" width="120" height="40" rx="4" fill="#b2f2bb" stroke="#2b8a3e" stroke-width="2"/>
+  <text x="120" y="105" text-anchor="middle" font-size="12" font-weight="600" fill="#2b8a3e">cloud-init (VM)</text>
+
+  <rect x="300" y="80" width="120" height="40" rx="4" fill="#fff3bf" stroke="#e67700" stroke-width="2"/>
+  <text x="360" y="105" text-anchor="middle" font-size="12" font-weight="600" fill="#e67700">nginx cache</text>
+
+  <rect x="540" y="80" width="120" height="40" rx="4" fill="#d0ebff" stroke="#1864ab" stroke-width="2"/>
+  <text x="600" y="105" text-anchor="middle" font-size="12" font-weight="600" fill="#1864ab">Renderer</text>
+
+  <rect x="780" y="80" width="120" height="40" rx="4" fill="#dee2e6" stroke="#495057" stroke-width="2"/>
+  <text x="840" y="105" text-anchor="middle" font-size="12" font-weight="600" fill="#1e1e1e">Netbox</text>
+
+  <!-- Lifelines (dashed vertical lines) -->
+  <line x1="120" y1="120" x2="120" y2="560" stroke="#868e96" stroke-width="1" stroke-dasharray="3 3"/>
+  <line x1="360" y1="120" x2="360" y2="560" stroke="#868e96" stroke-width="1" stroke-dasharray="3 3"/>
+  <line x1="600" y1="120" x2="600" y2="560" stroke="#868e96" stroke-width="1" stroke-dasharray="3 3"/>
+  <line x1="840" y1="120" x2="840" y2="560" stroke="#868e96" stroke-width="1" stroke-dasharray="3 3"/>
+
+  <!-- Sequence step 1: VM → nginx -->
+  <line x1="120" y1="160" x2="356" y2="160" stroke="#1864ab" stroke-width="2" marker-end="url(#arrowBlue)"/>
+  <text x="238" y="153" text-anchor="middle" font-size="11" fill="#1864ab" font-weight="500">GET /v1/render/SN12345/network-config</text>
+  <text x="238" y="170" text-anchor="middle" font-size="10" font-style="italic" fill="#495057">$mac substituted from SMBIOS</text>
+
+  <!-- Step 2: nginx cache miss check -->
+  <rect x="345" y="195" width="30" height="20" rx="2" fill="#fff3bf" stroke="#e67700" stroke-width="1"/>
+  <text x="380" y="210" font-size="11" fill="#495057">cache miss → forward upstream</text>
+
+  <!-- Step 3: nginx → renderer -->
+  <line x1="360" y1="240" x2="596" y2="240" stroke="#495057" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="478" y="233" text-anchor="middle" font-size="11" fill="#495057">proxy_pass → :8000</text>
+
+  <!-- Step 4: renderer → Netbox -->
+  <line x1="600" y1="280" x2="836" y2="280" stroke="#495057" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="718" y="273" text-anchor="middle" font-size="11" fill="#495057">pynetbox.dcim.devices.get(asset_tag=SN12345)</text>
+
+  <!-- Step 5: Netbox → renderer (response) -->
+  <line x1="840" y1="315" x2="604" y2="315" stroke="#495057" stroke-width="2" stroke-dasharray="6 4" marker-end="url(#arrow)"/>
+  <text x="722" y="308" text-anchor="middle" font-size="11" fill="#495057">Device record (interfaces, IPs, VLANs)</text>
+
+  <!-- Step 6: renderer self-loop (build intent + render) -->
+  <path d="M 600 345 Q 660 360 660 380 Q 660 400 600 415" stroke="#1864ab" stroke-width="2" fill="none" marker-end="url(#arrowBlue)"/>
+  <text x="688" y="370" font-size="11" fill="#1864ab">build HostIntent</text>
+  <text x="688" y="385" font-size="11" fill="#1864ab">render template → bytes</text>
+
+  <!-- Step 7: renderer → nginx (response with cache headers) -->
+  <line x1="600" y1="450" x2="364" y2="450" stroke="#1864ab" stroke-width="2" stroke-dasharray="6 4" marker-end="url(#arrowBlue)"/>
+  <text x="482" y="443" text-anchor="middle" font-size="11" fill="#1864ab">200 OK · ETag · Cache-Control: max-age=300</text>
+
+  <!-- Step 8: nginx writes to cache -->
+  <rect x="345" y="475" width="30" height="20" rx="2" fill="#fff3bf" stroke="#e67700" stroke-width="1"/>
+  <text x="380" y="490" font-size="11" fill="#495057">cache write → /var/cache/seeds</text>
+
+  <!-- Step 9: nginx → VM (response) -->
+  <line x1="360" y1="520" x2="124" y2="520" stroke="#1864ab" stroke-width="2" stroke-dasharray="6 4" marker-end="url(#arrowBlue)"/>
+  <text x="242" y="513" text-anchor="middle" font-size="11" fill="#1864ab">200 OK · network-config YAML</text>
+
+  <!-- Bottom note -->
+  <text x="480" y="585" text-anchor="middle" font-size="11" font-style="italic" fill="#868e96">Subsequent requests within 5 min return at step 2 from cache; renderer + Netbox not consulted.</text>
+  <text x="480" y="602" text-anchor="middle" font-size="10" fill="#868e96">Solid arrow = request.  Dashed arrow = response.</text>
+</svg>
