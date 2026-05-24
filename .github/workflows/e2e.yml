@@ -1,0 +1,32 @@
+name: e2e
+
+# Full pipeline e2e tests using KVM-enabled hosted runners.
+# Implementation lands in M7-1; this is the placeholder workflow.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  # Manual trigger so we can re-run without pushing.
+  workflow_dispatch:
+
+concurrency:
+  group: e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  e2e:
+    name: full pipeline e2e
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: placeholder
+        run: |
+          echo "E2E workflow scaffolding only — implementation lands in M7-1."
+          echo "Will execute: M4.5-1 (CPU host boot) + M5.5-1 (B300-shaped boot + Soft-RoCE)."
+          echo "Skipping for now to keep PRs unblocked."
+
+      # The `always()` teardown step will land in M7-1 alongside the real
+      # implementation; it enforces principle #11 (leave no trace) on CI runs.

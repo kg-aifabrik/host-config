@@ -14,6 +14,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `docs/` directory structure: `index.md` entry point, `architecture/` skeleton, `adr/` with Nygard-format template and README index, `runbooks/` skeleton, `diagrams/` README documenting the Excalidraw + SVG convention with shared color palette. (M0-3, #3)
 - Eleven seed ADRs (0001–0011) covering: Python 3.12, uv, FastAPI/Pydantic/Jinja with `/v1/` API versioning policy, ruff/mypy quality gates, pytest/Hypothesis testing, Ansible for IaC + config, just task runner, GitHub-rendered Markdown for docs, structlog+Prometheus observability, GitHub Actions for CI, systems overview. (M0-4, #4)
 - `docs/diagrams/systems-overview.svg` and `docs/diagrams/render-flow.svg` — hand-authored SVG component + sequence diagrams; mirrored in `docs/architecture/systems-overview.md` as living docs. (M0-4)
+- `.github/workflows/ci.yml` (lint + type-check + unit/component tests + coverage) and placeholder `.github/workflows/e2e.yml`. (M0-5, #5)
+- `.github/dependabot.yml` configured for pip/GHA/Docker weekly updates. (M0-5)
+- Issue templates (`layer-task`, `gate-test`, `bug`, `design-discussion`), `PULL_REQUEST_TEMPLATE.md`, `CODEOWNERS`. (M0-5)
+
+### Deferred
+
+- **Branch protection** on `main`. GitHub's branch protection API is gated behind paid plans for private repos; until the repo is on a paid plan (or goes public), the rules are enforced by local discipline (CONTRIBUTING.md). M7.5-1 revisits when the constraint changes. (M0-5)
 
 ### Changed
 

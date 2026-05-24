@@ -15,8 +15,8 @@
 The repo is currently a **solo-dev project**. Commits land **directly on `main`** — no feature branches, no PRs, no review ceremony. When a second contributor joins, this is the first convention to revisit (via a new ADR).
 
 - **No feature branches in v1.** Work straight on `main`.
-- **Force-pushes to `main` are blocked** by branch protection (M0-5).
-- **Linear history** required (set by branch protection); no merge commits.
+- **No merge commits.** Use rebase if pulling in remote changes.
+- **Branch protection deferred.** GitHub's branch protection API is gated behind paid plans for private repos. Until the repo is on a paid plan (or goes public), the rules below are enforced by **local discipline**: don't force-push, don't merge with red CI. CI workflows (`ci.yml`, `e2e.yml`) run on every push and are the post-hoc safety net.
 
 ## Commit conventions
 

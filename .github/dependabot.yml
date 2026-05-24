@@ -1,0 +1,45 @@
+# Dependabot configuration.
+# Keeps dependencies fresh; we review and merge weekly.
+
+version: 2
+
+updates:
+  # Python dependencies via uv (uv reads pyproject.toml + uv.lock).
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    labels:
+      - "kind:docs"
+      - "area:ci"
+    commit-message:
+      prefix: "chore"
+      include: "scope"
+
+  # GitHub Actions workflow versions.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    labels:
+      - "kind:docs"
+      - "area:ci"
+    commit-message:
+      prefix: "ci"
+      include: "scope"
+
+  # Docker base images (if/when we add Dockerfiles for the renderer service).
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    labels:
+      - "kind:docs"
+      - "area:ci"
+    commit-message:
+      prefix: "chore"
+      include: "scope"

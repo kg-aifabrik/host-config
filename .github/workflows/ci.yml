@@ -1,0 +1,68 @@
+name: ci
+
+# Runs lint, type-check, and the unit/component portion of the test pyramid
+# on every push to main and every PR. Fast feedback (<5 min target).
+#
+# E2E tests run in a separate workflow (e2e.yml, landing in M7-1) because
+# they need KVM and take longer.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Cancel in-flight runs on the same ref when a new commit lands.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint-and-type:
+    name: lint + type-check
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+
+      - name: sync dependencies
+        run: uv sync --frozen
+
+      - name: ruff check
+        run: uv run ruff check .
+
+      - name: ruff format --check
+        run: uv run ruff format --check .
+
+      - name: mypy --strict
+        run: uv run mypy
+
+  tests:
+    name: unit + component tests
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+
+      - name: sync dependencies
+        run: uv sync --frozen
+
+      - name: pytest with coverage
+        run: uv run pytest --cov=src/host_config --cov-report=term --cov-report=xml
+
+      - name: upload coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: |
+            coverage.xml
+          retention-days: 30
