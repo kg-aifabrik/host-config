@@ -1,0 +1,164 @@
+---
+# Role: netbox-dev
+# Brings up a Netbox instance via the upstream netbox-community/netbox-docker
+# Compose stack. Idempotent: re-running is a no-op once the stack is healthy
+# and the API token has been persisted.
+
+- name: Verify Docker is available on the target host
+  ansible.builtin.command: docker version --format '{% raw %}{{json .}}{% endraw %}'
+  register: docker_version_check
+  changed_when: false
+  failed_when: docker_version_check.rc != 0
+
+- name: Verify Docker Compose v2 plugin is available
+  ansible.builtin.command: docker compose version
+  register: docker_compose_check
+  changed_when: false
+  failed_when: docker_compose_check.rc != 0
+
+# --------------------------------------------------------------------------
+# Clone the upstream netbox-docker repo at the pinned release tag.
+# --------------------------------------------------------------------------
+
+# WHY: this and the later "Ensure token directory exists" target the
+# same parent (~/.host-config). We use mode 0700 in both places so the
+# alternating-modes idempotency bug doesn't bite. The token is the
+# privacy-sensitive artifact in this directory; 0700 is appropriate.
+- name: Ensure netbox-docker parent directory exists
+  ansible.builtin.file:
+    path: "{{ netbox_dev_workdir | dirname }}"
+    state: directory
+    mode: "0700"
+
+- name: Clone netbox-docker at the pinned release
+  ansible.builtin.git:
+    repo: https://github.com/netbox-community/netbox-docker.git
+    dest: "{{ netbox_dev_workdir }}"
+    version: "{{ netbox_dev_version }}"
+    update: false  # WHY: pin is the source of truth; don't fast-forward silently
+  # NOTE: a full clone (no `depth: 1`) costs ~50 MB on disk but lets us
+  # check out arbitrary tags without re-fetching. Worth it.
+
+# --------------------------------------------------------------------------
+# Drop in our docker-compose override (port + persistent volumes).
+# --------------------------------------------------------------------------
+
+- name: Render docker-compose.override.yml
+  ansible.builtin.template:
+    src: docker-compose.override.yml.j2
+    dest: "{{ netbox_dev_workdir }}/docker-compose.override.yml"
+    mode: "0644"
+
+# --------------------------------------------------------------------------
+# Bring up the stack.
+# --------------------------------------------------------------------------
+
+- name: Pull Netbox images
+  ansible.builtin.command: docker compose pull
+  args:
+    chdir: "{{ netbox_dev_workdir }}"
+  when: netbox_dev_pull_images
+  changed_when: false  # `pull` is implicitly idempotent
+
+- name: Start Netbox stack
+  ansible.builtin.command: docker compose up -d
+  args:
+    chdir: "{{ netbox_dev_workdir }}"
+  register: compose_up
+  changed_when: "'Started' in compose_up.stderr or 'Created' in compose_up.stderr"
+
+- name: Wait for Netbox HTTP to become ready
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ netbox_dev_http_port }}/api/"
+    status_code: [200, 403]  # 403 is "auth required" — proves the server is up
+  register: netbox_ready
+  until: netbox_ready.status in [200, 403]
+  retries: "{{ (netbox_dev_ready_timeout_seconds / 5) | int }}"
+  delay: 5
+
+# --------------------------------------------------------------------------
+# Bootstrap the superuser and API token. Idempotent: skip if the user
+# already exists.
+# --------------------------------------------------------------------------
+
+- name: Check whether superuser already exists
+  ansible.builtin.command: >-
+    docker compose exec -T netbox /opt/netbox/netbox/manage.py shell -c
+    "from users.models import User; print(User.objects.filter(username='{{ netbox_dev_superuser_name }}').exists())"
+  args:
+    chdir: "{{ netbox_dev_workdir }}"
+  register: superuser_check
+  changed_when: false
+
+- name: Create superuser if absent
+  ansible.builtin.command: >-
+    docker compose exec -T netbox /opt/netbox/netbox/manage.py
+    createsuperuser --noinput
+    --username {{ netbox_dev_superuser_name }}
+    --email {{ netbox_dev_superuser_email }}
+  args:
+    chdir: "{{ netbox_dev_workdir }}"
+  environment:
+    DJANGO_SUPERUSER_PASSWORD: "{{ netbox_dev_superuser_password }}"
+  when: "'True' not in superuser_check.stdout"
+  changed_when: true
+
+# --------------------------------------------------------------------------
+# API token: create if absent, persist to disk for callers (fixture
+# loader, renderer service) to read.
+# --------------------------------------------------------------------------
+
+- name: Ensure token directory exists
+  ansible.builtin.file:
+    path: "{{ netbox_dev_token_file | dirname }}"
+    state: directory
+    mode: "0700"
+
+# WHY: we use v1 tokens for the dev role. Netbox 4.6+ defaults to v2
+# tokens which require API_TOKEN_PEPPERS to be configured server-side.
+# The dev role values simplicity (works out of the box, no extra config)
+# over the slightly stronger v2 security model. Production deployment
+# is a separate concern — when it lands, an ADR documents the choice
+# of v2 + peppers there.
+#
+# Idempotency: get-or-create. If a v1 token for the user already exists,
+# we reuse it (no changed=true, token file unchanged); only the first
+# apply (or one following a manual revoke) creates a new token.
+- name: Ensure superuser has a v1 API token; print plaintext for capture
+  ansible.builtin.command: >-
+    docker compose exec -T netbox /opt/netbox/netbox/manage.py shell -v 0 -c
+    "import secrets;
+    from users.models import Token, User;
+    u = User.objects.get(username='{{ netbox_dev_superuser_name }}');
+    existing = Token.objects.filter(user=u, version=1).first();
+    t = existing if existing else Token.objects.create(user=u, version=1, plaintext=secrets.token_hex(20));
+    print(t.plaintext)"
+  args:
+    chdir: "{{ netbox_dev_workdir }}"
+  register: api_token_result
+  changed_when: false  # idempotent on subsequent runs
+
+- name: Persist API token to disk
+  ansible.builtin.copy:
+    content: "{{ api_token_result.stdout_lines | last }}\n"
+    dest: "{{ netbox_dev_token_file }}"
+    mode: "0600"
+
+- name: Final readiness probe with the persisted token
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ netbox_dev_http_port }}/api/dcim/devices/"
+    method: GET
+    headers:
+      Authorization: "Token {{ (lookup('ansible.builtin.file', netbox_dev_token_file) | trim) }}"
+    status_code: 200
+  register: final_check
+  retries: 6
+  delay: 5
+  until: final_check.status == 200
+
+- name: Print summary
+  ansible.builtin.debug:
+    msg:
+      - "Netbox is ready at http://127.0.0.1:{{ netbox_dev_http_port }}"
+      - "API token written to {{ netbox_dev_token_file }}"
+      - "Superuser: {{ netbox_dev_superuser_name }} (password is the dev seed; rotate for non-local use)"

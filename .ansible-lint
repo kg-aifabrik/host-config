@@ -1,0 +1,14 @@
+# ansible-lint config. Keep light at v1 — pile on stricter rules as
+# the role surface stabilizes.
+
+profile: production
+
+# We use git-cloned upstream repos in netbox-dev, intentional and pinned.
+skip_list:
+  - latest[git]
+  - command-instead-of-shell  # `docker compose` invocations need shell semantics
+
+# Roles + playbooks live here.
+exclude_paths:
+  - .venv/
+  - .uv/

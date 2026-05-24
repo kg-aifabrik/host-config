@@ -1,0 +1,20 @@
+---
+galaxy_info:
+  role_name: netbox_dev
+  author: kg-aifabrik
+  description: >
+    Brings up a local Netbox instance via the upstream netbox-community/netbox-docker
+    Compose stack, configured for development use. Used by Tier 1 lab fixtures.
+  license: Proprietary
+  min_ansible_version: "2.16"
+  platforms:
+    # The role runs Docker, which is Linux on the wire. On macOS the user's
+    # Docker Desktop / Rancher Desktop / Colima provides a Linux VM behind
+    # the docker socket — Ansible itself targets the local Mac shell, but
+    # the role's logical platform is Linux.
+    - name: Ubuntu
+      versions:
+        - jammy
+        - noble
+
+dependencies: []

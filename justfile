@@ -30,6 +30,11 @@ format:
 typecheck:
     uv run mypy
 
+# Lint Ansible roles + playbooks (must run from infra/ansible/ so the
+# local ansible.cfg + roles_path resolve correctly).
+lint-ansible:
+    cd infra/ansible && uv run ansible-lint
+
 # ---------------------------------------------------------------------------
 # Tests.
 # ---------------------------------------------------------------------------

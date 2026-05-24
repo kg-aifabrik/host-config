@@ -1,0 +1,38 @@
+---
+# Role defaults for netbox-dev. Override per-invocation via inventory vars
+# or extra-vars (-e key=value).
+
+# --------------------------------------------------------------------------
+# Upstream Netbox version pin.
+# Bumping this is a deliberate ADR-worthy decision — schema migrations,
+# new custom-field type behaviors, etc. Track the upstream release tag.
+# --------------------------------------------------------------------------
+netbox_dev_version: "5.0.1"
+
+# Where to clone the netbox-docker repo on the target host. Sized for
+# multi-checkout-friendly use (each version pin gets its own subdir).
+netbox_dev_workdir: "{{ ansible_user_dir }}/.host-config/netbox-docker-{{ netbox_dev_version }}"
+
+# Host port to expose Netbox on. Override if 8000 collides.
+netbox_dev_http_port: 8000
+
+# Superuser created on first apply. Subsequent runs are idempotent —
+# we check whether the user exists before creating.
+netbox_dev_superuser_name: "admin"
+netbox_dev_superuser_email: "admin@example.com"
+# WHY: this is a dev-only password seed; the rendered API token (saved
+# at netbox_dev_token_file) is what callers actually use. Override in
+# production via vault-encrypted vars.
+netbox_dev_superuser_password: "admin-dev-only"
+
+# API token written to this path (gitignored). Read by fixture scripts
+# and the renderer to authenticate against Netbox.
+netbox_dev_token_file: "{{ ansible_user_dir }}/.host-config/netbox-token"
+
+# How long to wait for Netbox to become healthy. First boot includes
+# database migrations and image pulls; budget generously.
+netbox_dev_ready_timeout_seconds: 600
+
+# Whether to pull images proactively before bringing the stack up.
+# Set to false in offline / restricted-network scenarios.
+netbox_dev_pull_images: true

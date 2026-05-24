@@ -1,0 +1,10 @@
+# Rendered by the netbox-dev Ansible role. Do not edit by hand.
+# Purpose: expose Netbox on a configurable host port. The upstream
+# netbox-docker compose file binds to port 8080 by default; we expose
+# it on {{ netbox_dev_http_port }} (host-side) for the lab's downstream
+# consumers (renderer, fixture loader, smoke tests).
+
+services:
+  netbox:
+    ports:
+      - "{{ netbox_dev_http_port }}:8080"

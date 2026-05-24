@@ -41,6 +41,11 @@ jobs:
       - name: mypy --strict
         run: uv run mypy
 
+      - name: ansible-lint
+        # ansible.cfg in infra/ansible/ sets the roles_path; ansible-lint
+        # must run from that directory to resolve role references.
+        run: cd infra/ansible && uv run ansible-lint
+
   tests:
     name: unit + component tests
     runs-on: ubuntu-24.04

@@ -9,6 +9,7 @@ authors = [{ name = "Karthik Gajjala", email = "kg@aifabrik.com" }]
 # Runtime dependencies. See ADR-0003 (FastAPI + Pydantic + Jinja).
 dependencies = [
     "pydantic>=2.9",
+    "pynetbox>=7.4",  # Netbox API client
 ]
 
 [build-system]
@@ -27,6 +28,9 @@ dev = [
     "pytest-asyncio>=0.24",
     "pytest-cov>=6.0",
     "hypothesis>=6.115",
+    # Ansible role linting. Ansible itself is installed at the OS level
+    # (Homebrew on macOS, apt on Linux) — keeping the dev venv lean.
+    "ansible-lint>=24.10",
 ]
 
 # ---------------------------------------------------------------------------

@@ -1,0 +1,4 @@
+---
+# No handlers in v1: the role is fully driven by explicit tasks.
+# When we add config files that need on-change service restarts, the
+# handler hooks land here.

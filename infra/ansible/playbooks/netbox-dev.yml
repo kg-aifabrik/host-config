@@ -1,0 +1,18 @@
+---
+# Smoke-test playbook for the netbox-dev role.
+#
+# Bring up Netbox on the local host:
+#   ansible-playbook -i localhost, -c local infra/ansible/playbooks/netbox-dev.yml
+#
+# Tear down (manual):
+#   docker compose -f ~/.host-config/netbox-docker-<version>/docker-compose.yml \
+#                  -f ~/.host-config/netbox-docker-<version>/docker-compose.override.yml \
+#                  down --volumes
+
+- name: Bring up local Netbox for development
+  hosts: localhost
+  connection: local
+  gather_facts: true
+  become: false
+  roles:
+    - role: netbox-dev
