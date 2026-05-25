@@ -1,0 +1,71 @@
+---
+# Destroy the host-config lab Droplet and verify zero residual resources.
+#
+# Usage:
+#   cd infra/ansible
+#   ansible-playbook -i localhost, playbooks/destroy.yml
+#
+# What this does:
+#   1. Deletes the Droplet tagged host-config-lab.
+#   2. Removes the local infra/ansible/inventory/lab file.
+#   3. Verifies via the DO API that no Droplets with the tag remain.
+#
+# Idempotency: running against an already-deleted Droplet is a no-op
+# (community.digitalocean.digital_ocean_droplet state: absent).
+
+- name: Destroy DO lab Droplet
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    _do_token: "{{ lookup('env', 'DIGITALOCEAN_TOKEN') }}"
+    lab_droplet_name: "host-config-lab"
+
+  tasks:
+    - name: Assert DIGITALOCEAN_TOKEN is set
+      ansible.builtin.assert:
+        that: _do_token | length > 0
+        fail_msg: "DIGITALOCEAN_TOKEN must be set."
+
+    # ------------------------------------------------------------------
+    # Destroy Droplet.
+    # ------------------------------------------------------------------
+    - name: Delete Droplet {{ lab_droplet_name }}
+      community.digitalocean.digital_ocean_droplet:
+        state: absent
+        oauth_token: "{{ _do_token }}"
+        name: "{{ lab_droplet_name }}"
+        unique_name: true
+
+    # ------------------------------------------------------------------
+    # Clean up local inventory file.
+    # ------------------------------------------------------------------
+    - name: Remove local inventory file
+      ansible.builtin.file:
+        path: "{{ playbook_dir }}/../inventory/lab"
+        state: absent
+
+    # ------------------------------------------------------------------
+    # Verify zero residual Droplets with the lab tag.
+    # ------------------------------------------------------------------
+    - name: Query DO API for residual Droplets
+      ansible.builtin.uri:
+        url: "https://api.digitalocean.com/v2/droplets?tag_name=host-config-lab"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ _do_token }}"
+        status_code: 200
+      register: _residual_check
+
+    - name: Assert zero residual Droplets
+      ansible.builtin.assert:
+        that: _residual_check.json.meta.total == 0
+        fail_msg: >
+          {{ _residual_check.json.meta.total }} Droplet(s) with tag
+          host-config-lab still exist after destroy. Investigate at
+          https://cloud.digitalocean.com/droplets.
+
+    - name: Teardown complete
+      ansible.builtin.debug:
+        msg: "All host-config-lab resources destroyed and verified clean."

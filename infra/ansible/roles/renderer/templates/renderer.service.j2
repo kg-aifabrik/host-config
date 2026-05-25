@@ -1,0 +1,35 @@
+[Unit]
+Description=host-config renderer
+Documentation=https://github.com/kg-aifabrik/host-config
+# WHY After=network-online.target: the renderer calls Netbox on startup
+# (/readyz) and needs the network up. network.target is too early.
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User={{ renderer_user }}
+Group={{ renderer_group }}
+WorkingDirectory={{ renderer_install_dir }}
+EnvironmentFile={{ renderer_install_dir }}/renderer.env
+
+ExecStart={{ renderer_install_dir }}/.venv/bin/uvicorn \
+    host_config.service.app:app \
+    --host {{ renderer_bind_host }} \
+    --port {{ renderer_port }} \
+    --no-access-log
+
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=host-config-renderer
+
+# Harden the service — not exhaustive but catches the obvious vectors.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths={{ renderer_install_dir }}
+
+[Install]
+WantedBy=multi-user.target

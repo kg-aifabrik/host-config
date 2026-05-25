@@ -1,0 +1,16 @@
+---
+# Ansible collection requirements.
+#
+# Install before running any playbook:
+#   cd infra/ansible && ansible-galaxy collection install -r requirements.yml
+#
+# CI installs these in the e2e workflow; see .github/workflows/e2e.yml.
+
+collections:
+  - name: community.digitalocean
+    # Minimum version that has the digital_ocean_droplet + digital_ocean_firewall
+    # modules with the idempotent unique_name parameter.
+    version: ">=1.27.0"
+  - name: ansible.posix
+    # synchronize (rsync-based push) for deploying the renderer source tree.
+    version: ">=1.5.4"

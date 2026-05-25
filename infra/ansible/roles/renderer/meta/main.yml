@@ -1,0 +1,16 @@
+---
+galaxy_info:
+  role_name: renderer
+  author: host-config
+  description: >
+    Deploys the host-config renderer FastAPI service as a systemd unit.
+    Syncs source from the control node, installs deps via uv, and starts
+    the service behind a loopback port for the nginx-cache reverse proxy.
+  license: MIT
+  min_ansible_version: "2.14"
+  platforms:
+    - name: Ubuntu
+      versions:
+        - noble
+
+dependencies: []

@@ -1,0 +1,16 @@
+---
+# Handlers for the renderer role.
+
+- name: Reload renderer
+  # Zero-downtime reload: systemd sends SIGHUP which uvicorn treats as a
+  # graceful restart. Only available in Gunicorn-managed uvicorn workers;
+  # for a single-worker lab service we restart instead.
+  ansible.builtin.service:
+    name: host-config-renderer
+    state: restarted
+  listen: reload renderer
+
+- name: Systemd daemon reload
+  ansible.builtin.systemd:
+    daemon_reload: true
+  listen: reload systemd

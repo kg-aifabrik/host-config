@@ -1,0 +1,224 @@
+---
+# Tasks for the renderer role.
+#
+# Execution order:
+#   1. Install uv (from pinned GitHub release if not already present).
+#   2. Create system user + group.
+#   3. Create install directory.
+#   4. Push source tree from the control node via rsync.
+#   5. Install Python dependencies with `uv sync --frozen`.
+#   6. Resolve the Netbox token (explicit var wins; else read the file).
+#   7. Deploy the systemd EnvironmentFile.
+#   8. Deploy the systemd unit.
+#   9. Enable + start the service.
+#  10. Wait for /healthz to return 200.
+#
+# Idempotency:
+#   - uv installation is gated on a stat check.
+#   - systemd tasks notify daemon-reload only when the unit file changes.
+#   - `uv sync --frozen` is a no-op when the lock file is already satisfied.
+
+# --------------------------------------------------------------------------
+# 1. uv — download the pinned static binary.
+# --------------------------------------------------------------------------
+
+- name: Check whether uv is already installed
+  ansible.builtin.stat:
+    path: /usr/local/bin/uv
+  register: renderer_uv_stat
+
+- name: Download uv installer (version {{ renderer_uv_version }})
+  ansible.builtin.get_url:
+    url: >-
+      https://github.com/astral-sh/uv/releases/download/{{ renderer_uv_version
+      }}/uv-x86_64-unknown-linux-gnu.tar.gz
+    dest: /tmp/uv-{{ renderer_uv_version }}.tar.gz
+    mode: "0644"
+  when: not renderer_uv_stat.stat.exists
+
+- name: Extract uv archive
+  ansible.builtin.unarchive:
+    src: /tmp/uv-{{ renderer_uv_version }}.tar.gz
+    dest: /tmp/
+    remote_src: true
+  when: not renderer_uv_stat.stat.exists
+
+- name: Install uv binary to /usr/local/bin
+  ansible.builtin.copy:
+    src: /tmp/uv-x86_64-unknown-linux-gnu/uv
+    dest: /usr/local/bin/uv
+    mode: "0755"
+    remote_src: true
+  become: true
+  when: not renderer_uv_stat.stat.exists
+
+# --------------------------------------------------------------------------
+# 2–3. System user + install directory.
+# --------------------------------------------------------------------------
+
+- name: Create host-config system group
+  ansible.builtin.group:
+    name: "{{ renderer_group }}"
+    system: true
+    state: present
+  become: true
+
+- name: Create host-config system user
+  ansible.builtin.user:
+    name: "{{ renderer_user }}"
+    group: "{{ renderer_group }}"
+    system: true
+    shell: /usr/sbin/nologin
+    home: "{{ renderer_install_dir }}"
+    create_home: false
+    state: present
+  become: true
+
+- name: Create install directory
+  ansible.builtin.file:
+    path: "{{ renderer_install_dir }}"
+    state: directory
+    owner: "{{ renderer_user }}"
+    group: "{{ renderer_group }}"
+    mode: "0755"
+  become: true
+
+# --------------------------------------------------------------------------
+# 4. Push source tree from control node → Droplet.
+#    pyproject.toml + uv.lock + src/ are needed for uv sync + the service.
+#    fixtures/ is pushed so the populate script runs after Netbox is up.
+# --------------------------------------------------------------------------
+
+- name: Synchronize pyproject.toml and uv.lock
+  ansible.posix.synchronize:
+    src: "{{ playbook_dir }}/../../../{{ item }}"
+    dest: "{{ renderer_install_dir }}/{{ item }}"
+    checksum: true
+    delete: false
+  loop:
+    - pyproject.toml
+    - uv.lock
+  notify: reload renderer
+  become: true
+
+- name: Synchronize src/ tree
+  ansible.posix.synchronize:
+    src: "{{ playbook_dir }}/../../../src/"
+    dest: "{{ renderer_install_dir }}/src/"
+    checksum: true
+    delete: true
+    rsync_opts:
+      - "--exclude=__pycache__"
+      - "--exclude=*.pyc"
+      - "--exclude=.mypy_cache"
+  notify: reload renderer
+  become: true
+
+- name: Synchronize fixtures/ tree
+  ansible.posix.synchronize:
+    src: "{{ playbook_dir }}/../../../fixtures/"
+    dest: "{{ renderer_install_dir }}/fixtures/"
+    checksum: true
+    delete: true
+    rsync_opts:
+      - "--exclude=__pycache__"
+      - "--exclude=*.pyc"
+  become: true
+
+- name: Fix ownership of install directory tree
+  ansible.builtin.file:
+    path: "{{ renderer_install_dir }}"
+    state: directory
+    owner: "{{ renderer_user }}"
+    group: "{{ renderer_group }}"
+    recurse: true
+  become: true
+
+# --------------------------------------------------------------------------
+# 5. Install Python dependencies.
+#    --frozen: use exactly the locked versions; fail if lock is stale.
+#    --project: treat install_dir as the project root.
+# --------------------------------------------------------------------------
+
+- name: Install Python dependencies with uv sync
+  ansible.builtin.command:
+    cmd: >-
+      /usr/local/bin/uv sync --frozen
+      --project {{ renderer_install_dir }}
+  become: true
+  become_user: "{{ renderer_user }}"
+  changed_when: true  # uv is fast; always run and let it decide
+
+# --------------------------------------------------------------------------
+# 6. Resolve Netbox token.
+# --------------------------------------------------------------------------
+
+- name: Read Netbox token from file (fallback)
+  ansible.builtin.slurp:
+    src: "{{ renderer_netbox_token_file }}"
+  register: renderer_nb_token_slurp
+  when: renderer_netbox_token | length == 0
+  become: true
+
+- name: Set effective Netbox token
+  ansible.builtin.set_fact:
+    _renderer_effective_token: >-
+      {{
+        renderer_netbox_token
+        if renderer_netbox_token | length > 0
+        else (renderer_nb_token_slurp.content | b64decode | trim)
+      }}
+
+# --------------------------------------------------------------------------
+# 7–8. systemd EnvironmentFile + unit.
+# --------------------------------------------------------------------------
+
+- name: Deploy renderer EnvironmentFile
+  ansible.builtin.template:
+    src: renderer.env.j2
+    dest: "{{ renderer_install_dir }}/renderer.env"
+    owner: root
+    group: "{{ renderer_group }}"
+    mode: "0640"   # group-readable so service user can read; not world-readable
+  become: true
+  notify: reload renderer
+
+- name: Deploy renderer systemd unit
+  ansible.builtin.template:
+    src: renderer.service.j2
+    dest: /etc/systemd/system/host-config-renderer.service
+    owner: root
+    group: root
+    mode: "0644"
+  become: true
+  notify:
+    - reload systemd
+    - reload renderer
+
+# --------------------------------------------------------------------------
+# 9. Enable + start.
+# --------------------------------------------------------------------------
+
+- name: Flush handlers (daemon-reload before enable/start)
+  ansible.builtin.meta: flush_handlers
+
+- name: Enable and start host-config-renderer
+  ansible.builtin.service:
+    name: host-config-renderer
+    enabled: true
+    state: started
+  become: true
+
+# --------------------------------------------------------------------------
+# 10. Smoke-test: wait for /healthz → 200.
+# --------------------------------------------------------------------------
+
+- name: Wait for renderer /healthz
+  ansible.builtin.uri:
+    url: "http://{{ renderer_bind_host }}:{{ renderer_port }}/healthz"
+    method: GET
+    status_code: 200
+  register: renderer_healthz
+  until: renderer_healthz.status == 200
+  retries: 12
+  delay: 5

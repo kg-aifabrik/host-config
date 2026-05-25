@@ -65,33 +65,84 @@ hooks-all:
     uv run pre-commit run --all-files
 
 # ---------------------------------------------------------------------------
-# Lab (implemented in M6).
+# Lab — provision → configure → test → destroy on DigitalOcean.
+#
+# Requires DIGITALOCEAN_TOKEN and SSH_KEY_FINGERPRINT in .env.
+# See docs/runbooks/deploy-do.md for full usage.
 # ---------------------------------------------------------------------------
 
+# _lab_ip: read the Droplet IP from the dynamic inventory file.
+# Used by lab-test and lab-logs to target the correct host.
+_lab_ip := `grep -oP '\d+\.\d+\.\d+\.\d+' infra/ansible/inventory/lab 2>/dev/null | head -1 || echo ""`
+
 # Provision + configure the DO lab.
+# Step 1: create Droplet + write inventory/lab.
+# Step 2: deploy the full stack (Docker, Netbox, renderer, nginx, OVS, QEMU).
 lab-up:
-    @echo "TODO: implemented in M6-1 (provision.yml + deploy-lab.yml)"
-    @exit 1
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd infra/ansible
+    ansible-galaxy collection install -r requirements.yml --force-with-deps
+    ansible-playbook -i localhost, playbooks/provision.yml
+    ansible-playbook -i inventory/lab playbooks/deploy-lab.yml
 
-# Tear down the DO lab; verify zero residual resources.
+# Tear down the DO lab; verify zero residual resources via the DO API.
 lab-down:
-    @echo "TODO: implemented in M6-3 (Ansible destroy + DO API verify)"
-    @exit 1
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd infra/ansible
+    ansible-playbook -i localhost, playbooks/destroy.yml
 
-# Run e2e tests against the live lab.
+# Run e2e tests on the Droplet over SSH.
+# The tests run on the Droplet itself so they have access to /dev/kvm,
+# the OVS bridge, and the local lab services.
 lab-test:
-    @echo "TODO: implemented in M6-3"
-    @exit 1
+    #!/usr/bin/env bash
+    set -euo pipefail
+    LAB_IP="{{ _lab_ip }}"
+    if [[ -z "$LAB_IP" ]]; then
+        echo "No lab inventory found — run 'just lab-up' first." >&2
+        exit 1
+    fi
+    # Sync the test suite to the Droplet (renderer role syncs src/ + fixtures/;
+    # we additionally need tests/ to run pytest on the Droplet).
+    rsync -az --exclude=__pycache__ --exclude="*.pyc" \
+        tests/ root@"${LAB_IP}":/opt/host-config/tests/
+    rsync -az conftest.py root@"${LAB_IP}":/opt/host-config/conftest.py 2>/dev/null || true
+    # Run e2e tests on the Droplet.
+    ssh root@"${LAB_IP}" \
+        "cd /opt/host-config && \
+         PYTHONPATH=/opt/host-config/src:/opt/host-config \
+         .venv/bin/pytest tests/e2e/ -v --no-header"
 
-# Compose: up → test → down with trap-on-exit cleanup (principle #11).
+# Compose: provision → test → teardown.
+# trap ensures lab-down runs even on test failure or Ctrl-C (principle #11).
 lab:
-    @echo "TODO: implemented in M6-3 (trap 'just lab-down' EXIT INT TERM)"
-    @exit 1
+    #!/usr/bin/env bash
+    set -euo pipefail
+    trap 'just lab-down' EXIT INT TERM
+    just lab-up
+    just lab-test
 
-# Collect logs from the live lab.
+# Collect renderer / nginx / OVS / cloud-init logs from the Droplet.
 lab-logs:
-    @echo "TODO: implemented in M6-3"
-    @exit 1
+    #!/usr/bin/env bash
+    set -euo pipefail
+    LAB_IP="{{ _lab_ip }}"
+    if [[ -z "$LAB_IP" ]]; then
+        echo "No lab inventory found — run 'just lab-up' first." >&2
+        exit 1
+    fi
+    echo "=== renderer (last 100 lines) ==="
+    ssh root@"${LAB_IP}" "journalctl -u host-config-renderer -n 100 --no-pager"
+    echo "=== nginx access log (last 50 lines) ==="
+    ssh root@"${LAB_IP}" "tail -n 50 /var/log/nginx/host-config-access.log 2>/dev/null || echo '(no log yet)'"
+    echo "=== OVS bridge state ==="
+    ssh root@"${LAB_IP}" "ovs-vsctl show"
+    echo "=== CPU cloud-init serial log ==="
+    ssh root@"${LAB_IP}" "cat /tmp/cpu-boot.log 2>/dev/null || echo '(not found)'"
+    echo "=== B300 cloud-init serial log ==="
+    ssh root@"${LAB_IP}" "cat /tmp/b300-boot.log 2>/dev/null || echo '(not found)'"
 
 # ---------------------------------------------------------------------------
 # Hygiene.

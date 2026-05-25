@@ -1,0 +1,139 @@
+---
+# Deploy the full host-config lab stack to a provisioned Droplet.
+#
+# Usage (after provision.yml has written inventory/lab):
+#   cd infra/ansible
+#   ansible-playbook -i inventory/lab playbooks/deploy-lab.yml
+#
+# Stack deployed:
+#   Docker + Netbox  (netbox-dev role)
+#   Renderer service (renderer role — FastAPI + uvicorn via systemd)
+#   nginx-cache      (nginx-cache role — caching reverse proxy)
+#   OVS bridge       (ovs-harness role — br-test + N-S + E-W tap interfaces)
+#   QEMU + KVM tools (qemu-host role)
+#
+# Role order matters:
+#   netbox-dev must finish before renderer so the API token file exists.
+#   renderer must finish before nginx-cache so /healthz is reachable.
+#   ovs-harness and qemu-host are independent of the above.
+#
+# Idempotency: all roles use --may-exist / idempotency guards; a second
+# run is a no-op for every task.
+
+- name: Install Docker (prerequisite for netbox-dev)
+  hosts: lab
+  gather_facts: true
+  become: true
+
+  tasks:
+    - name: Install Docker prerequisites
+      ansible.builtin.apt:
+        name:
+          - ca-certificates
+          - curl
+          - gnupg
+          - lsb-release
+        state: present
+        update_cache: true
+
+    - name: Add Docker GPG key
+      ansible.builtin.get_url:
+        url: https://download.docker.com/linux/ubuntu/gpg
+        dest: /etc/apt/keyrings/docker.asc
+        mode: "0644"
+
+    - name: Add Docker apt repository
+      ansible.builtin.apt_repository:
+        repo: >-
+          deb [arch=amd64 signed-by=/etc/apt/keyrings/docker.asc]
+          https://download.docker.com/linux/ubuntu
+          {{ ansible_distribution_release }} stable
+        state: present
+        filename: docker
+
+    - name: Install Docker CE
+      ansible.builtin.apt:
+        name:
+          - docker-ce
+          - docker-ce-cli
+          - containerd.io
+          - docker-buildx-plugin
+          - docker-compose-plugin
+        state: present
+        update_cache: true
+
+    - name: Ensure Docker service is started
+      ansible.builtin.service:
+        name: docker
+        enabled: true
+        state: started
+
+# --------------------------------------------------------------------------
+# Netbox — must run before renderer so the API token is present.
+# --------------------------------------------------------------------------
+- name: Deploy Netbox (netbox-dev)
+  hosts: lab
+  gather_facts: true
+
+  roles:
+    - role: netbox-dev
+
+# --------------------------------------------------------------------------
+# Renderer — reads Netbox token written by netbox-dev.
+# --------------------------------------------------------------------------
+- name: Deploy renderer service
+  hosts: lab
+  gather_facts: true
+
+  roles:
+    - role: renderer
+
+# --------------------------------------------------------------------------
+# nginx-cache — proxies /v1/ to the renderer that is now running.
+# --------------------------------------------------------------------------
+- name: Deploy nginx-cache
+  hosts: lab
+  gather_facts: true
+
+  roles:
+    - role: nginx-cache
+
+# --------------------------------------------------------------------------
+# OVS bridge + QEMU host — independent of the HTTP stack.
+# --------------------------------------------------------------------------
+- name: Deploy OVS harness and QEMU host
+  hosts: lab
+  gather_facts: true
+
+  roles:
+    - role: ovs-harness
+    - role: qemu-host
+
+# --------------------------------------------------------------------------
+# Populate Netbox with lab fixtures so the renderer can serve payloads.
+# --------------------------------------------------------------------------
+- name: Populate Netbox fixtures
+  hosts: lab
+  gather_facts: false
+
+  tasks:
+    - name: Read Netbox token
+      ansible.builtin.slurp:
+        src: /root/.host-config/netbox-token
+      register: _nb_token_slurp
+      become: true
+
+    - name: Run fixture population script
+      ansible.builtin.command:
+        cmd: >-
+          /opt/host-config/.venv/bin/python
+          -m fixtures.netbox.populate
+      args:
+        chdir: /opt/host-config
+      environment:
+        NETBOX_URL: "http://127.0.0.1:8000"
+        NETBOX_TOKEN: "{{ _nb_token_slurp.content | b64decode | trim }}"
+        PYTHONPATH: "/opt/host-config/src:/opt/host-config"
+      changed_when: true
+      become: true
+      become_user: host-config

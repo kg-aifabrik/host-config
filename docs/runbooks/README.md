@@ -14,10 +14,6 @@ Operational procedures. Each runbook is a step-by-step walkthrough for a specifi
 
 ## Index
 
-Runbooks land as their associated operations get implemented:
-
-- *Deploy lab to DigitalOcean* — M6-2 will land at `deploy-do.md`.
+- [Deploy lab to DigitalOcean](deploy-do.md) — provision a DO Droplet, configure the full stack, run E2E tests, and tear it down cleanly.
 - *Debug a failing render* — opens after M2.
 - *Force-evict the nginx cache* — opens after M3.
-
-For now this is an empty index awaiting content.

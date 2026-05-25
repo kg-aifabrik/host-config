@@ -1,0 +1,49 @@
+---
+# Role defaults for renderer. Override per-invocation via inventory vars
+# or extra-vars (-e key=value).
+
+# --------------------------------------------------------------------------
+# System user / group that runs the service.
+# A dedicated system account limits blast radius if the renderer process is
+# compromised; it owns the install directory and nothing else.
+# --------------------------------------------------------------------------
+renderer_user: host-config
+renderer_group: host-config
+
+# --------------------------------------------------------------------------
+# Installation directory.
+# pyproject.toml + uv.lock + src/ land here; uv creates .venv/ alongside.
+# --------------------------------------------------------------------------
+renderer_install_dir: /opt/host-config
+
+# --------------------------------------------------------------------------
+# Network.
+# The renderer binds to loopback only; nginx-cache proxies to it.
+# Port 8080 avoids a conflict with Netbox's port 8000.
+# --------------------------------------------------------------------------
+renderer_bind_host: "127.0.0.1"
+renderer_port: 8080
+
+# --------------------------------------------------------------------------
+# Netbox connection.
+# renderer_netbox_url: URL of the Netbox instance.
+# renderer_netbox_token_file: path to the plaintext token written by the
+#   netbox-dev role. The renderer role reads it and injects it via the
+#   systemd EnvironmentFile so the service user never needs file access.
+# Override renderer_netbox_token directly to skip the file lookup (useful
+# when running the role standalone against an existing Netbox).
+# --------------------------------------------------------------------------
+renderer_netbox_url: "http://127.0.0.1:8000"
+renderer_netbox_token_file: "/root/.host-config/netbox-token"
+renderer_netbox_token: ""   # if non-empty, used directly; else file is read
+
+# --------------------------------------------------------------------------
+# Logging.
+# --------------------------------------------------------------------------
+renderer_log_level: INFO
+
+# --------------------------------------------------------------------------
+# uv version.
+# Pinned so the installer download is deterministic. Bump deliberately.
+# --------------------------------------------------------------------------
+renderer_uv_version: "0.5.24"
