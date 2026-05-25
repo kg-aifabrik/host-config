@@ -1,6 +1,6 @@
 #cloud-config
-hostname: k8s-cp-01
-fqdn: k8s-cp-01
+hostname: k8s-cp-01.pod07.site03.internal
+fqdn: k8s-cp-01.pod07.site03.internal
 manage_etc_hosts: true
 
 preserve_hostname: false

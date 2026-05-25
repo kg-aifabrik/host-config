@@ -43,17 +43,82 @@ from host_config.models.vlan import VlanChild, VlanRole
 
 
 def make_cpu_intent() -> HostIntent:
-    """A minimal valid `cpu`-role `HostIntent`.
+    """A valid `cpu`-role `HostIntent` mirroring the YAML fixture `cpu-host.yaml`.
 
     Returns a fresh instance per call so tests can mutate without
-    cross-contaminating. Shape: 2 N-S NICs (aa:bb:cc:00:00:01..02),
-    one LACP bond on top, three VLAN children with the canonical role
-    assignment (mgmt/storage/ingress) and one default gateway on mgmt.
+    cross-contaminating. All identifiers (hostname, MACs, IPs) must
+    exactly match `fixtures/netbox/data/cpu-host.yaml` so that the
+    goldens generated from this factory are byte-equal to what the
+    pipeline produces from a live Netbox populated with those fixtures.
+
+    If you change any value here, update the YAML fixture and regenerate
+    the goldens (`src/host_config/render/golden/cpu/*`).
     """
     return HostIntent(
         asset_tag="SN-CPU-001",
-        hostname="k8s-cp-01",
+        hostname="k8s-cp-01.pod07.site03.internal",
         role=Role.CPU,
+        ns_nics=[
+            BondMember(name="nsa", mac="aa:bb:cc:00:01:01", mtu=9000),
+            BondMember(name="nsb", mac="aa:bb:cc:00:01:02", mtu=9000),
+        ],
+        bond=Bond(name="bond0", members=["nsa", "nsb"], mtu=9000),
+        vlans=[
+            VlanChild(
+                name="bond0.100",
+                parent="bond0",
+                vlan_id=100,
+                role=VlanRole.MGMT,
+                mtu=1500,
+                address=IPv4Interface("10.42.10.11/24"),
+                gateway=IPv4Address("10.42.10.1"),
+            ),
+            VlanChild(
+                name="bond0.200",
+                parent="bond0",
+                vlan_id=200,
+                role=VlanRole.STORAGE,
+                mtu=9000,
+                address=IPv4Interface("10.42.20.11/24"),
+            ),
+            VlanChild(
+                name="bond0.300",
+                parent="bond0",
+                vlan_id=300,
+                role=VlanRole.INGRESS,
+                mtu=1500,
+                address=IPv4Interface("10.42.30.11/24"),
+            ),
+        ],
+    )
+
+
+def make_b300_intent() -> HostIntent:
+    """A valid `gpu-b300`-role `HostIntent` mirroring the YAML fixture `b300-host.yaml`.
+
+    All identifiers (hostname, MACs, IPs) must exactly match
+    `fixtures/netbox/data/b300-host.yaml`. The N-S subsystem uses the
+    B300 fixture's own MACs and IPs (distinct from the cpu fixture).
+    The 8 RoCE underlays (gpu0..gpu7) use MACs aa:bb:cc:00:00:10..17
+    and per-NIC IPs 10.42.100..107.23/24, as declared in the YAML.
+
+    If you change any value here, update the YAML fixture and regenerate
+    the goldens (`src/host_config/render/golden/gpu-b300/*`).
+    """
+    roce = [
+        RoceUnderlay(
+            name=f"gpu{i}",
+            mac=f"aa:bb:cc:00:00:{0x10 + i:02x}",
+            mtu=9000,
+            sriov_vfs=16,
+            address=IPv4Interface(f"10.42.{100 + i}.23/24"),
+        )
+        for i in range(8)
+    ]
+    return HostIntent(
+        asset_tag="SN-GPU-001",
+        hostname="gpu-b300-01.pod07.site03.internal",
+        role=Role.GPU_B300,
         ns_nics=[
             BondMember(name="nsa", mac="aa:bb:cc:00:00:01", mtu=9000),
             BondMember(name="nsb", mac="aa:bb:cc:00:00:02", mtu=9000),
@@ -86,35 +151,6 @@ def make_cpu_intent() -> HostIntent:
                 address=IPv4Interface("10.42.30.23/24"),
             ),
         ],
-    )
-
-
-def make_b300_intent() -> HostIntent:
-    """A minimal valid `gpu-b300`-role `HostIntent` with all 10 NICs.
-
-    Builds on `make_cpu_intent()` for the N-S subsystem (bond + VLAN
-    children) and adds 8 RoCE underlays (gpu0..gpu7) with MACs
-    aa:bb:cc:00:00:10..17 and per-NIC underlay IPs in
-    10.42.100..107.23/24.
-    """
-    cpu = make_cpu_intent()
-    roce = [
-        RoceUnderlay(
-            name=f"gpu{i}",
-            mac=f"aa:bb:cc:00:00:{0x10 + i:02x}",
-            mtu=9000,
-            sriov_vfs=16,
-            address=IPv4Interface(f"10.42.{100 + i}.23/24"),
-        )
-        for i in range(8)
-    ]
-    return HostIntent(
-        asset_tag="SN-GPU-001",
-        hostname="gpu-b300-23",
-        role=Role.GPU_B300,
-        ns_nics=cpu.ns_nics,
-        bond=cpu.bond,
-        vlans=cpu.vlans,
         roce_underlays=roce,
     )
 

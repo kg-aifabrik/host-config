@@ -92,7 +92,7 @@ def _build_client(
                 raise loader_result
             return loader_result
 
-        routes_mod.load_host_intent = fake_loader  # type: ignore[assignment]
+        routes_mod.load_host_intent = fake_loader  # type: ignore[assignment,attr-defined]
 
     client = TestClient(app)
     # Override dependency too — defense in depth (some routes use the
