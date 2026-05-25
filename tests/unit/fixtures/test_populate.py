@@ -221,6 +221,7 @@ def _build_empty_netbox_client() -> MagicMock:
     client.dcim.device_roles.get.return_value = None
     client.dcim.devices.get.return_value = None
     client.dcim.interfaces.get.return_value = None
+    client.dcim.mac_addresses.get.return_value = None
     client.ipam.vlans.get.return_value = None
     client.ipam.ip_addresses.get.return_value = None
 
@@ -234,6 +235,7 @@ def _build_empty_netbox_client() -> MagicMock:
     client.dcim.device_roles.create.side_effect = _create_factory
     client.dcim.devices.create.side_effect = _create_factory
     client.dcim.interfaces.create.side_effect = _create_factory
+    client.dcim.mac_addresses.create.side_effect = _create_factory
     client.ipam.vlans.create.side_effect = _create_factory
     client.ipam.ip_addresses.create.side_effect = _create_factory
 

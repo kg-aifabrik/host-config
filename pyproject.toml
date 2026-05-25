@@ -97,6 +97,7 @@ markers = [
     "slow: component/integration tests requiring containers",
     "e2e: end-to-end tests requiring full lab",
     "requires_kvm: tests that need KVM acceleration",
+    "requires_netbox: tests that need a live Netbox at NETBOX_URL (default localhost:8000)",
 ]
 addopts = "--strict-markers --strict-config -ra"
 

@@ -283,7 +283,13 @@ def _apply_one(client: pynetbox.api, fx: HostFixture, report: PopulateReport) ->
     for iface_spec in fx.interfaces:
         _wire_relationships(client, iface_spec, device, iface_by_name, report)
 
-    # Pass 3: IP addresses (one per interface that has `ip:`).
+    # Pass 3: MAC addresses (Netbox 4.2+ moved these to a first-class
+    # `/api/dcim/mac-addresses/` endpoint, assigned to interfaces).
+    for iface_spec in fx.interfaces:
+        if iface_spec.mac:
+            _ensure_mac_address(client, iface_spec, iface_by_name[iface_spec.name], report)
+
+    # Pass 4: IP addresses (one per interface that has `ip:`).
     for iface_spec in fx.interfaces:
         if iface_spec.ip:
             _ensure_ip_address(client, iface_spec, iface_by_name[iface_spec.name], report)
@@ -427,8 +433,9 @@ def _ensure_interface(
         "name": spec.name,
         "type": spec.type,
     }
-    if spec.mac:
-        payload["mac_address"] = spec.mac
+    # NOTE: MAC is set in a separate pass via _ensure_mac_address.
+    # Netbox 4.2+ rejects `mac_address` on the interface POST payload
+    # (moved to first-class /api/dcim/mac-addresses/).
     if spec.mtu:
         payload["mtu"] = spec.mtu
     if spec.untagged_vlan and spec.untagged_vlan in vlan_by_vid:
@@ -475,6 +482,60 @@ def _wire_relationships(
             logger.info("interface_parent set child=%s parent=%s", spec.name, spec.parent)
         else:
             report.add_skipped("interface_parent")
+
+
+def _ensure_mac_address(
+    client: pynetbox.api,
+    spec: InterfaceSpec,
+    iface: Any,
+    report: PopulateReport,
+) -> Any:
+    """Ensure the MAC is assigned to the interface in Netbox 4.2+.
+
+    In Netbox 4.2+, MAC addresses moved out of the interface model into
+    a first-class ``dcim.mac_addresses`` endpoint, with the interface
+    pointing back via ``primary_mac_address``. This helper:
+      1. Looks up an existing MAC for the interface; reuses if present.
+      2. Otherwise creates a MACAddress record assigned to the interface.
+      3. Patches the interface to mark it as the primary MAC.
+
+    Idempotent: re-runs find the existing MAC and verify the primary
+    pointer already matches.
+    """
+    assert spec.mac  # caller guarantees this
+    existing = client.dcim.mac_addresses.get(mac_address=spec.mac)
+    if existing:
+        # Verify it's assigned to the right interface; conflict otherwise.
+        assigned_id = getattr(existing, "assigned_object_id", None)
+        if assigned_id and assigned_id != iface.id:
+            raise FixtureConflictError(
+                "mac_address",
+                spec.mac,
+                f"assigned to interface_id={assigned_id}, expected {iface.id}",
+            )
+        report.add_skipped("mac_address")
+        mac_obj = existing
+    else:
+        mac_obj = client.dcim.mac_addresses.create(
+            {
+                "mac_address": spec.mac,
+                "assigned_object_type": "dcim.interface",
+                "assigned_object_id": iface.id,
+            }
+        )
+        report.add_created("mac_address")
+        logger.info("mac_address created %s on interface=%s", spec.mac, spec.name)
+
+    # Set as primary MAC on the interface if not already.
+    current_primary_id = (
+        getattr(iface.primary_mac_address, "id", None) if iface.primary_mac_address else None
+    )
+    if current_primary_id != mac_obj.id:
+        iface.update({"primary_mac_address": mac_obj.id})
+        report.add_created("primary_mac_assignment")
+    else:
+        report.add_skipped("primary_mac_assignment")
+    return mac_obj
 
 
 def _ensure_ip_address(
