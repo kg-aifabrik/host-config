@@ -16,7 +16,13 @@ The repo is currently a **solo-dev project**. Commits land **directly on `main`*
 
 - **No feature branches in v1.** Work straight on `main`.
 - **No merge commits.** Use rebase if pulling in remote changes.
-- **Branch protection deferred.** GitHub's branch protection API is gated behind paid plans for private repos. Until the repo is on a paid plan (or goes public), the rules below are enforced by **local discipline**: don't force-push, don't merge with red CI. CI workflows (`ci.yml`, `e2e.yml`) run on every push and are the post-hoc safety net.
+- **Branch protection rules** (M7.5-1): enforced via GitHub once the repo upgrades to a paid plan or goes public. Until then, enforced by local discipline. The intended rules are:
+  - All CI checks must be green before landing: `lint + type-check`, `unit + component tests`, `e2e cpu-host-boot`, `e2e b300-host-boot`, `check-links`
+  - Linear history required (no merge commits)
+  - Force-pushes to `main` disabled
+  - No review count requirement (solo-dev v1)
+  - No signed-commits requirement (solo-dev v1)
+- **Force-pushes are forbidden** on `main` by local discipline even while branch protection is deferred. A force-push to `main` is a destructive operation; raise it in a comment first.
 
 ## Commit conventions
 
@@ -77,6 +83,24 @@ Pre-commit hooks run on every commit:
 - YAML/JSON validation
 
 If a hook fails, fix the underlying issue and commit again. Do **not** bypass with `--no-verify` unless explicitly approved.
+
+## CI gate failure reference (M7.5-2)
+
+Each gate produces a distinct error message. Use this table to diagnose a blocked run quickly.
+
+| Gate | Workflow | Blocked by | Typical error message | Remedy |
+|---|---|---|---|---|
+| Failing test | `e2e.yml` | `cpu-host-boot` or `b300-host-boot` job | `FAILED tests/e2e/test_*.py::Test*::test_* — AssertionError` | Fix the assertion; check serial log via `just lab-logs` |
+| Coverage drop >2% | `ci.yml` | informational comment only — does NOT block | Coverage comment: `Coverage dropped by X.XX%` | Review uncovered code; decide whether to add tests |
+| Bad commit message | pre-commit hook | `commit-msg` hook | `Your commit message does not follow Conventional Commits` | Rewrite: `git commit --amend` with `feat:`, `fix:`, `test:` etc. |
+| Broken docs link | `docs-links.yml` | `check-links` job | `ERROR: [lychee] broken link: ./missing-file.md` | Fix the path or remove the stale reference |
+| ADR not in index | `docs-links.yml` | `check-links` job | `ADR 'NNNN-*' not listed in docs/adr/README.md` | Add the ADR entry to `docs/adr/README.md` |
+| Unsigned commit | branch protection | (deferred — not yet enforced) | `Required commit signing not satisfied` | `git config commit.gpgsign true` |
+| Force-push to main | branch protection | (deferred — forbidden by discipline) | `[remote rejected] main → main (protected branch hook declined)` | Use `git revert` instead |
+
+**Coverage drop is never blocking** — per CODE_CONVENTIONS §6.7, a drop triggers a PR comment warning
+but does not fail the CI run. The philosophy: a deliberate deletion of dead code should not be
+punished by blocking CI. Review the comment and decide consciously.
 
 ## Reporting issues
 

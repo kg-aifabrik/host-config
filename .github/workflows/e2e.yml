@@ -1,32 +1,426 @@
 name: e2e
 
-# Full pipeline e2e tests using KVM-enabled hosted runners.
-# Implementation lands in M7-1; this is the placeholder workflow.
+# Full pipeline E2E tests using KVM-enabled GitHub-hosted runners.
+# Implements M7-1: M4.5-1 (CPU host boot) + M5.5-1 (B300 + Soft-RoCE).
+#
+# Two parallel jobs run concurrently:
+#   cpu-host-boot  — 25 min timeout
+#   b300-host-boot — 30 min timeout (larger VM + rdma_rxe loading)
+#
+# Each job is fully self-contained: it starts its own Netbox, renderer,
+# nginx, and OVS bridge so they can run side-by-side on separate runners
+# without resource conflicts.
+#
+# Cloud image cached across runs to save ~3 min per run.
+#
+# Teardown:
+#   Every job has a final step with `if: always()` that kills QEMU,
+#   tears down docker-compose (Netbox), and removes the OVS bridge.
+#   This enforces principle #11 (leave no trace) on CI runners.
 
 on:
   push:
     branches: [main]
   pull_request:
     branches: [main]
-  # Manual trigger so we can re-run without pushing.
   workflow_dispatch:
 
 concurrency:
   group: e2e-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  IMAGE_PATH: /tmp/noble-server-cloudimg-amd64.img
+  NETBOX_URL: http://127.0.0.1:8000
+  RENDERER_URL: http://127.0.0.1:8080
+  SEED_SERVER_URL: http://127.0.0.1:80
+  UV_CACHE_DIR: /tmp/.uv-cache
+
+# ---------------------------------------------------------------------------
+# Job 1: CPU host first-boot (M4.5-1).
+# ---------------------------------------------------------------------------
 jobs:
-  e2e:
-    name: full pipeline e2e
+  cpu-host-boot:
+    name: CPU host first-boot (M4.5-1)
     runs-on: ubuntu-24.04
+    timeout-minutes: 25
+
     steps:
       - uses: actions/checkout@v4
 
-      - name: placeholder
-        run: |
-          echo "E2E workflow scaffolding only — implementation lands in M7-1."
-          echo "Will execute: M4.5-1 (CPU host boot) + M5.5-1 (B300-shaped boot + Soft-RoCE)."
-          echo "Skipping for now to keep PRs unblocked."
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
 
-      # The `always()` teardown step will land in M7-1 alongside the real
-      # implementation; it enforces principle #11 (leave no trace) on CI runs.
+      - name: Sync Python dependencies
+        run: uv sync --frozen
+
+      - name: Verify KVM
+        run: |
+          echo "::group::KVM verification"
+          ls -la /dev/kvm
+          sudo usermod -aG kvm "$USER"
+          echo "KVM available — tests will use hardware acceleration."
+          echo "::endgroup::"
+
+      - name: Install system packages
+        run: |
+          echo "::group::apt install"
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            qemu-system-x86 \
+            openvswitch-switch \
+            openvswitch-common \
+            nginx \
+            rsync
+          echo "::endgroup::"
+
+      - name: Install Ansible collections
+        run: |
+          echo "::group::ansible-galaxy"
+          cd infra/ansible
+          uv run ansible-galaxy collection install -r requirements.yml
+          echo "::endgroup::"
+
+      - name: Cache cloud image
+        id: image-cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.IMAGE_PATH }}
+          key: noble-cloudimg-${{ hashFiles('.github/workflows/e2e.yml') }}
+          restore-keys: noble-cloudimg-
+
+      - name: Download Ubuntu Noble cloud image
+        if: steps.image-cache.outputs.cache-hit != 'true'
+        run: |
+          echo "::group::Download image (~600 MB)"
+          uv run python -m fixtures.vms.prepare_image --out "$IMAGE_PATH"
+          echo "::endgroup::"
+        env:
+          PYTHONPATH: src
+
+      - name: Start Netbox
+        run: |
+          echo "::group::Netbox startup"
+          uv run ansible-playbook -i localhost, -c local \
+            infra/ansible/playbooks/netbox-dev.yml
+          echo "Polling Netbox /api/..."
+          for i in $(seq 1 24); do
+            if curl -sf "$NETBOX_URL/api/" >/dev/null 2>&1; then
+              echo "Netbox up after $((i * 5)) s"
+              break
+            fi
+            echo "  wait $i/24..."
+            sleep 5
+          done
+          echo "::endgroup::"
+
+      - name: Populate Netbox fixtures
+        run: |
+          echo "::group::Netbox fixtures"
+          NETBOX_TOKEN=$(cat ~/.host-config/netbox-token)
+          export NETBOX_TOKEN
+          uv run python -m fixtures.netbox.populate
+          echo "::endgroup::"
+        env:
+          NETBOX_URL: ${{ env.NETBOX_URL }}
+          PYTHONPATH: src
+
+      - name: Start renderer
+        run: |
+          echo "::group::Renderer start"
+          NETBOX_TOKEN=$(cat ~/.host-config/netbox-token)
+          export NETBOX_TOKEN
+          uv run uvicorn host_config.service.app:app \
+            --host 127.0.0.1 --port 8080 --no-access-log &
+          echo "RENDERER_PID=$!" >> "$GITHUB_ENV"
+          for i in $(seq 1 12); do
+            if curl -sf http://127.0.0.1:8080/healthz >/dev/null 2>&1; then
+              echo "Renderer up after $((i * 5)) s"
+              break
+            fi
+            echo "  wait $i/12..."
+            sleep 5
+          done
+          echo "::endgroup::"
+        env:
+          NETBOX_URL: ${{ env.NETBOX_URL }}
+
+      - name: Configure nginx-cache
+        run: |
+          echo "::group::nginx-cache"
+          sudo mkdir -p /var/cache/host-config/seeds
+          sudo tee /etc/nginx/sites-available/host-config-cache > /dev/null <<'EOF'
+          proxy_cache_path /var/cache/host-config/seeds
+            levels=1:2
+            keys_zone=seedcache:10m
+            inactive=24h
+            max_size=1g
+            use_temp_path=off;
+
+          server {
+            listen 80 default_server;
+            server_name _;
+
+            location /v1/ {
+              proxy_pass http://127.0.0.1:8080;
+              proxy_cache seedcache;
+              proxy_cache_valid 200 300s;
+              add_header X-Cache-Status $upstream_cache_status;
+            }
+            location ~ ^/(healthz|readyz|metrics)$ {
+              proxy_pass http://127.0.0.1:8080;
+            }
+          }
+          EOF
+          sudo ln -sf /etc/nginx/sites-available/host-config-cache \
+                      /etc/nginx/sites-enabled/host-config-cache
+          sudo rm -f /etc/nginx/sites-enabled/default
+          sudo nginx -t
+          sudo systemctl restart nginx
+          echo "::endgroup::"
+
+      - name: Set up OVS bridge + N-S taps (CPU shape)
+        run: |
+          echo "::group::OVS harness"
+          sudo systemctl start openvswitch-switch
+          sudo ovs-vsctl --may-exist add-br br-test
+          for TAP in tap-nsa tap-nsb; do
+            ip link show "$TAP" &>/dev/null 2>&1 || \
+              sudo ip tuntap add dev "$TAP" mode tap
+            sudo ip link set "$TAP" up
+            sudo ovs-vsctl --may-exist add-port br-test "$TAP"
+            sudo ovs-vsctl set port "$TAP" trunks=100,200,300
+          done
+          echo "::endgroup::"
+
+      - name: Generate SSH key
+        run: |
+          ssh-keygen -t ed25519 -f /tmp/lab-key -N "" -C "ci-e2e"
+          echo "E2E_SSH_KEY_PATH=/tmp/lab-key" >> "$GITHUB_ENV"
+
+      - name: Run CPU host E2E test (M4.5-1)
+        run: |
+          echo "::group::CPU E2E test"
+          uv run pytest tests/e2e/test_cpu_host_boot.py \
+            -v --no-header --tb=short
+          echo "::endgroup::"
+        env:
+          NETBOX_URL: ${{ env.NETBOX_URL }}
+          SEED_SERVER_URL: ${{ env.SEED_SERVER_URL }}
+          E2E_IMAGE_PATH: ${{ env.IMAGE_PATH }}
+          E2E_SSH_KEY_PATH: /tmp/lab-key
+
+      - name: Teardown (always)
+        if: always()
+        run: |
+          echo "::group::Teardown"
+          [[ -n "${RENDERER_PID:-}" ]] && kill "$RENDERER_PID" 2>/dev/null || true
+          pkill -f qemu-system-x86_64 2>/dev/null || true
+          WORKDIR="$HOME/.host-config"
+          COMPOSE=$(find "$WORKDIR" -name "docker-compose.yml" 2>/dev/null | head -1)
+          [[ -n "$COMPOSE" ]] && \
+            (cd "$(dirname "$COMPOSE")" && docker compose down --volumes) 2>/dev/null || true
+          sudo ovs-vsctl del-br br-test 2>/dev/null || true
+          echo "::endgroup::"
+
+# ---------------------------------------------------------------------------
+# Job 2: B300 host first-boot + Soft-RoCE (M5.5-1).
+# ---------------------------------------------------------------------------
+  b300-host-boot:
+    name: B300 host first-boot + Soft-RoCE (M5.5-1)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Sync Python dependencies
+        run: uv sync --frozen
+
+      - name: Verify KVM
+        run: |
+          echo "::group::KVM verification"
+          ls -la /dev/kvm
+          sudo usermod -aG kvm "$USER"
+          echo "KVM available."
+          echo "::endgroup::"
+
+      - name: Install system packages
+        run: |
+          echo "::group::apt install"
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            qemu-system-x86 \
+            openvswitch-switch \
+            openvswitch-common \
+            rdma-core \
+            libibverbs-utils \
+            ibverbs-utils \
+            nginx \
+            rsync
+          echo "::endgroup::"
+
+      - name: Install Ansible collections
+        run: |
+          echo "::group::ansible-galaxy"
+          cd infra/ansible
+          uv run ansible-galaxy collection install -r requirements.yml
+          echo "::endgroup::"
+
+      - name: Cache cloud image
+        id: image-cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.IMAGE_PATH }}
+          key: noble-cloudimg-${{ hashFiles('.github/workflows/e2e.yml') }}
+          restore-keys: noble-cloudimg-
+
+      - name: Download Ubuntu Noble cloud image
+        if: steps.image-cache.outputs.cache-hit != 'true'
+        run: |
+          echo "::group::Download image (~600 MB)"
+          uv run python -m fixtures.vms.prepare_image --out "$IMAGE_PATH"
+          echo "::endgroup::"
+        env:
+          PYTHONPATH: src
+
+      - name: Start Netbox
+        run: |
+          echo "::group::Netbox startup"
+          uv run ansible-playbook -i localhost, -c local \
+            infra/ansible/playbooks/netbox-dev.yml
+          for i in $(seq 1 24); do
+            if curl -sf "$NETBOX_URL/api/" >/dev/null 2>&1; then
+              echo "Netbox up after $((i * 5)) s"
+              break
+            fi
+            echo "  wait $i/24..."
+            sleep 5
+          done
+          echo "::endgroup::"
+
+      - name: Populate Netbox fixtures
+        run: |
+          echo "::group::Netbox fixtures"
+          NETBOX_TOKEN=$(cat ~/.host-config/netbox-token)
+          export NETBOX_TOKEN
+          uv run python -m fixtures.netbox.populate
+          echo "::endgroup::"
+        env:
+          NETBOX_URL: ${{ env.NETBOX_URL }}
+          PYTHONPATH: src
+
+      - name: Start renderer
+        run: |
+          echo "::group::Renderer start"
+          NETBOX_TOKEN=$(cat ~/.host-config/netbox-token)
+          export NETBOX_TOKEN
+          uv run uvicorn host_config.service.app:app \
+            --host 127.0.0.1 --port 8080 --no-access-log &
+          echo "RENDERER_PID=$!" >> "$GITHUB_ENV"
+          for i in $(seq 1 12); do
+            if curl -sf http://127.0.0.1:8080/healthz >/dev/null 2>&1; then
+              echo "Renderer up after $((i * 5)) s"
+              break
+            fi
+            echo "  wait $i/12..."
+            sleep 5
+          done
+          echo "::endgroup::"
+        env:
+          NETBOX_URL: ${{ env.NETBOX_URL }}
+
+      - name: Configure nginx-cache
+        run: |
+          echo "::group::nginx-cache"
+          sudo mkdir -p /var/cache/host-config/seeds
+          sudo tee /etc/nginx/sites-available/host-config-cache > /dev/null <<'EOF'
+          proxy_cache_path /var/cache/host-config/seeds
+            levels=1:2
+            keys_zone=seedcache:10m
+            inactive=24h
+            max_size=1g
+            use_temp_path=off;
+
+          server {
+            listen 80 default_server;
+            server_name _;
+
+            location /v1/ {
+              proxy_pass http://127.0.0.1:8080;
+              proxy_cache seedcache;
+              proxy_cache_valid 200 300s;
+              add_header X-Cache-Status $upstream_cache_status;
+            }
+            location ~ ^/(healthz|readyz|metrics)$ {
+              proxy_pass http://127.0.0.1:8080;
+            }
+          }
+          EOF
+          sudo ln -sf /etc/nginx/sites-available/host-config-cache \
+                      /etc/nginx/sites-enabled/host-config-cache
+          sudo rm -f /etc/nginx/sites-enabled/default
+          sudo nginx -t
+          sudo systemctl restart nginx
+          echo "::endgroup::"
+
+      - name: Set up OVS bridge + N-S taps + E-W taps (B300 shape)
+        run: |
+          echo "::group::OVS harness (B300)"
+          sudo systemctl start openvswitch-switch
+          sudo ovs-vsctl --may-exist add-br br-test
+          # N-S taps — bridged, VLAN trunked.
+          for TAP in tap-nsa tap-nsb; do
+            ip link show "$TAP" &>/dev/null 2>&1 || \
+              sudo ip tuntap add dev "$TAP" mode tap
+            sudo ip link set "$TAP" up
+            sudo ovs-vsctl --may-exist add-port br-test "$TAP"
+            sudo ovs-vsctl set port "$TAP" trunks=100,200,300
+          done
+          # E-W taps — bare, not bridged.
+          for i in $(seq 0 7); do
+            TAP="tap-gpu${i}"
+            ip link show "$TAP" &>/dev/null 2>&1 || \
+              sudo ip tuntap add dev "$TAP" mode tap
+            sudo ip link set "$TAP" up
+          done
+          echo "::endgroup::"
+
+      - name: Generate SSH key
+        run: |
+          ssh-keygen -t ed25519 -f /tmp/lab-key -N "" -C "ci-e2e"
+          echo "E2E_SSH_KEY_PATH=/tmp/lab-key" >> "$GITHUB_ENV"
+
+      - name: Run B300 host E2E test (M5.5-1)
+        run: |
+          echo "::group::B300 E2E test"
+          uv run pytest tests/e2e/test_b300_host_boot.py \
+            -v --no-header --tb=short
+          echo "::endgroup::"
+        env:
+          NETBOX_URL: ${{ env.NETBOX_URL }}
+          SEED_SERVER_URL: ${{ env.SEED_SERVER_URL }}
+          E2E_IMAGE_PATH: ${{ env.IMAGE_PATH }}
+          E2E_SSH_KEY_PATH: /tmp/lab-key
+
+      - name: Teardown (always)
+        if: always()
+        run: |
+          echo "::group::Teardown"
+          [[ -n "${RENDERER_PID:-}" ]] && kill "$RENDERER_PID" 2>/dev/null || true
+          pkill -f qemu-system-x86_64 2>/dev/null || true
+          WORKDIR="$HOME/.host-config"
+          COMPOSE=$(find "$WORKDIR" -name "docker-compose.yml" 2>/dev/null | head -1)
+          [[ -n "$COMPOSE" ]] && \
+            (cd "$(dirname "$COMPOSE")" && docker compose down --volumes) 2>/dev/null || true
+          sudo ovs-vsctl del-br br-test 2>/dev/null || true
+          echo "::endgroup::"

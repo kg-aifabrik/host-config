@@ -1,0 +1,82 @@
+name: docs-links
+
+# Scans Markdown for broken internal links, missing SVG references, and
+# ADR files not listed in docs/adr/README.md. Blocks merge on failure.
+#
+# Implements M7-3.
+#
+# Tool: lychee — fast Rust-based link checker with GitHub-native output.
+#   https://github.com/lycheeverse/lychee
+#
+# What is checked:
+#   - Relative Markdown link targets (./foo.md, ../bar/baz.md)
+#   - Image / SVG references (![alt](path))
+#   - External URLs (http/https) — failures are warnings only (external sites
+#     can be temporarily unreachable in CI; don't block on transient 5xx).
+#   - ADR index completeness: every *.md under docs/adr/ must appear in
+#     docs/adr/README.md.
+#
+# External URL policy:
+#   External link failures are reported as warnings and do NOT block merge.
+#   Only internal / relative link failures block. This avoids false-positive
+#   CI failures caused by ephemeral 5xx or rate-limiting from external hosts.
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "**.md"
+      - "**.svg"
+      - ".github/workflows/docs-links.yml"
+  # Allow manual trigger to re-check after fixing a stale link.
+  workflow_dispatch:
+
+jobs:
+  check-links:
+    name: Check Markdown links
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # -- Lychee: internal links + images ----------------------------------
+      - name: Check internal links and image references
+        uses: lycheeverse/lychee-action@v2
+        with:
+          # Only scan Markdown and SVG files.
+          args: |
+            --config .lychee.toml
+            --no-progress
+            --format markdown
+            README.md
+            docs/**/*.md
+            infra/**/*.md
+            **/README.md
+          fail: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # -- ADR index completeness -------------------------------------------
+      - name: Check ADR index completeness
+        run: |
+          echo "::group::ADR index check"
+          FAIL=0
+          # Every *.md in docs/adr/ (except README.md and template.md) must
+          # appear (by filename, without the .md suffix) in docs/adr/README.md.
+          while IFS= read -r -d '' adr_file; do
+            filename=$(basename "$adr_file" .md)
+            if [[ "$filename" == "README" ]] || [[ "$filename" == "template" ]]; then
+              continue
+            fi
+            if ! grep -q "$filename" docs/adr/README.md; then
+              echo "::error file=docs/adr/README.md::ADR '$filename' not listed in docs/adr/README.md"
+              FAIL=1
+            fi
+          done < <(find docs/adr -name "*.md" -print0)
+          if [[ $FAIL -eq 1 ]]; then
+            echo "Fix: add missing ADR entries to docs/adr/README.md"
+            exit 1
+          fi
+          echo "All ADR files are listed in docs/adr/README.md."
+          echo "::endgroup::"

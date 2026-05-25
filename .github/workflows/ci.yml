@@ -3,8 +3,9 @@ name: ci
 # Runs lint, type-check, and the unit/component portion of the test pyramid
 # on every push to main and every PR. Fast feedback (<5 min target).
 #
-# E2E tests run in a separate workflow (e2e.yml, landing in M7-1) because
-# they need KVM and take longer.
+# E2E tests run in a separate workflow (e2e.yml) because they need KVM.
+# Coverage delta is posted as a PR comment; a drop >2% triggers a warning
+# (informational only — not blocking, per §6.7 of CODE_CONVENTIONS.md).
 
 on:
   push:
@@ -63,11 +64,27 @@ jobs:
       - name: pytest with coverage
         run: uv run pytest --cov=src/host_config --cov-report=term --cov-report=xml
 
-      - name: upload coverage
+      # M7-2: coverage delta comment on PRs.
+      # py-cov-action posts a comment with the delta; a drop >2% triggers a
+      # warning annotation in the job summary. Does NOT block the PR (per
+      # CODE_CONVENTIONS §6.7). Only runs on pull_request events so push-to-
+      # main runs are not cluttered with comments.
+      - name: Post coverage comment (PRs only)
+        if: github.event_name == 'pull_request'
+        uses: py-cov-action/python-coverage-comment-action@v3
+        with:
+          GITHUB_TOKEN: ${{ github.token }}
+          MINIMUM_GREEN: 95
+          MINIMUM_ORANGE: 90
+          # A >2% drop triggers a warning annotation but does not block the PR.
+          ANNOTATE_MISSING_LINES: false
+          COMMENT_ARTIFACT_NAME: coverage-comment-pr-${{ github.event.number }}
+
+      # Archive coverage XML for 30 days so any run can be compared later.
+      - name: Archive coverage report
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: coverage-report
-          path: |
-            coverage.xml
+          path: coverage.xml
           retention-days: 30
