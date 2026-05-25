@@ -86,7 +86,7 @@ jobs:
 
       - name: Cache cloud image
         id: image-cache
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ${{ env.IMAGE_PATH }}
           key: noble-cloudimg-${{ hashFiles('.github/workflows/e2e.yml') }}
@@ -278,7 +278,7 @@ jobs:
 
       - name: Cache cloud image
         id: image-cache
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ${{ env.IMAGE_PATH }}
           key: noble-cloudimg-${{ hashFiles('.github/workflows/e2e.yml') }}
