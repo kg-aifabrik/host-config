@@ -23,7 +23,7 @@ jobs:
     name: lint + type-check
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: install uv
         uses: astral-sh/setup-uv@v3
@@ -51,7 +51,7 @@ jobs:
     name: unit + component tests
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: install uv
         uses: astral-sh/setup-uv@v3
