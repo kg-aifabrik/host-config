@@ -17,6 +17,7 @@ Coverage:
 from __future__ import annotations
 
 from pathlib import Path
+from typing import ClassVar
 
 import pytest
 from fixtures.vms.launch import build_cmdline
@@ -186,7 +187,7 @@ class TestBuildCmdlineB300:
     """build_cmdline with 8 E-W RoCE NICs (B300 shape)."""
 
     # 8 E-W NICs: (nic_name, mac, tap_iface)
-    _ROCE_NICS = [
+    _ROCE_NICS: ClassVar[list[tuple[str, str, str]]] = [
         (f"gpu{i}", f"aa:bb:cc:00:00:{0x10 + i:02x}", f"tap-gpu{i}")
         for i in range(8)
     ]
@@ -212,7 +213,7 @@ class TestBuildCmdlineB300:
         device_vals = _collect_flag_values(cmd, "-device")
         # SLIRP + nsa + nsb + gpu0..7 = 11 virtio-net entries.
         virtio_nics = [v for v in device_vals if "virtio-net-pci" in v]
-        assert len(virtio_nics) == 11  # noqa: PLR2004
+        assert len(virtio_nics) == 11
 
     @pytest.mark.fast
     def test_each_roce_nic_has_correct_mac(self) -> None:
@@ -259,7 +260,7 @@ class TestBuildCmdlineB300:
         assert cmd_none == cmd_empty
         device_vals = _collect_flag_values(cmd_none, "-device")
         virtio_nics = [v for v in device_vals if "virtio-net-pci" in v]
-        assert len(virtio_nics) == 3  # noqa: PLR2004  (SLIRP + nsa + nsb)
+        assert len(virtio_nics) == 3
 
     @pytest.mark.fast
     def test_b300_cmdline_deterministic(self) -> None:
