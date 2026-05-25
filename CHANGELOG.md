@@ -19,6 +19,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Issue templates (`layer-task`, `gate-test`, `bug`, `design-discussion`), `PULL_REQUEST_TEMPLATE.md`, `CODEOWNERS`. (M0-5)
 
 - HostIntent Pydantic models + error hierarchy. `src/host_config/models/` exposes `PhysIface`, `BondMember`, `Bond`, `SriovParent`, `RoceUnderlay`, `VlanChild`, `VlanRole`, `HostIntent`, `Role`, plus the `MacAddress` validated type. `src/host_config/errors.py` and `src/host_config/models/errors.py` establish the typed exception hierarchy (`HostConfigError` → `ModelError` → `InvariantError`). Ten cross-field invariants enforce host-level rules (one default gateway, MTU monotonicity, RoCE count per role, etc.). 89 unit tests, 98% line + branch coverage. (M2-1, #11)
+- Ansible role `netbox-dev` brings up the upstream `netbox-community/netbox-docker` Compose stack on the local host. Idempotent end-to-end (verified: changed=0 on subsequent runs). Mints a v1 API token persisted to `~/.host-config/netbox-token`. CI runs `ansible-lint` (production profile). (M1-1, #6)
+- Netbox custom-field schema: `src/host_config/netbox/schema.py` declares the seven custom fields the host model depends on (bf3_mode, roce_tc, numa_node, sriov_vfs, gpu_affinity, observed_mac, observed_firmware) as immutable `CustomFieldSpec` dataclasses. `apply_schema` is idempotent and distinguishes recoverable from unrecoverable drift. Typed `NetboxError` hierarchy (NetboxQueryError, HostNotFoundError, SchemaError) with contextual fields. (M1-2, #7)
 
 ### Deferred
 
