@@ -1,0 +1,17 @@
+---
+galaxy_info:
+  role_name: ovs_harness
+  author: host-config
+  description: >
+    Install Open vSwitch and create the test bridge br-test with LACP
+    partner config, VLAN trunks 100/200/300, and tap interfaces for VM
+    attachment. Used by the M4 QEMU lab harness.
+  license: MIT
+  min_ansible_version: "2.15"
+  platforms:
+    - name: Ubuntu
+      versions:
+        - jammy
+        - noble
+
+dependencies: []

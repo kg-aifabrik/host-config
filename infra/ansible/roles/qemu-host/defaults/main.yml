@@ -1,0 +1,31 @@
+---
+# Role defaults for qemu-host. Override per-invocation via inventory
+# vars or extra-vars (-e key=value).
+
+# --------------------------------------------------------------------------
+# Lab user.
+# The OS user that will run QEMU processes. Must already exist on the
+# host before this role runs.
+# --------------------------------------------------------------------------
+qemu_host_lab_user: "{{ ansible_user }}"
+
+# --------------------------------------------------------------------------
+# KVM assertion.
+# When true, the role asserts that /dev/kvm is present and accessible.
+# Set to false on CI hosts where hardware KVM is unavailable and TCG
+# (software emulation) is acceptable.
+# --------------------------------------------------------------------------
+qemu_host_assert_kvm: true
+
+# --------------------------------------------------------------------------
+# Packages.
+# Minimal set required to: run VMs, manage them via libvirt, customise
+# cloud images, and introspect guest filesystems.
+# --------------------------------------------------------------------------
+qemu_host_packages:
+  - qemu-system-x86
+  - libvirt-daemon-system
+  - libvirt-clients
+  - virtinst
+  - libguestfs-tools
+  - python3-libvirt    # for Ansible's virt modules in later milestones

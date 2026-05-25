@@ -1,0 +1,10 @@
+---
+# Handlers for ovs-harness.
+# OVS changes take effect immediately via ovs-vsctl; no daemon restart
+# is needed. These handlers are present for completeness but rarely fire.
+
+- name: Restart openvswitch
+  ansible.builtin.service:
+    name: openvswitch-switch
+    state: restarted
+  listen: restart openvswitch

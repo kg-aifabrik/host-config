@@ -1,0 +1,17 @@
+---
+galaxy_info:
+  role_name: qemu_host
+  author: host-config
+  description: >
+    Install QEMU/KVM, libvirt, and libguestfs-tools on the target host
+    and configure KVM group permissions for the lab user. Prerequisite
+    for the QEMU-based lab harness (M4).
+  license: MIT
+  min_ansible_version: "2.15"
+  platforms:
+    - name: Ubuntu
+      versions:
+        - jammy
+        - noble
+
+dependencies: []

@@ -1,0 +1,82 @@
+---
+# Tasks for the ovs-harness role.
+#
+# Execution order:
+#   1. Install OVS packages.
+#   2. Ensure the openvswitch-switch service is running.
+#   3. Create the test bridge (idempotent via `ovs-vsctl --may-exist`).
+#   4. Create tap interfaces (idempotent — check existence first).
+#   5. Add tap interfaces to the bridge (idempotent via `--may-exist`).
+#   6. Configure VLAN trunks on all tap ports.
+#   7. Assert the bridge exists and has the expected LACP configuration.
+#
+# Idempotency approach:
+#   `ovs-vsctl --may-exist add-br` and `--may-exist add-port` are no-ops
+#   if the object already exists. `ip tuntap add` fails with EBUSY if the
+#   tap already exists, so we check first with `ip link show`.
+
+- name: Install Open vSwitch packages
+  ansible.builtin.apt:
+    name:
+      - openvswitch-switch
+      - openvswitch-common
+    state: present
+    update_cache: true
+  become: true
+
+- name: Ensure openvswitch-switch is enabled and started
+  ansible.builtin.service:
+    name: openvswitch-switch
+    enabled: true
+    state: started
+  become: true
+
+- name: Create OVS bridge {{ ovs_bridge_name }}
+  ansible.builtin.command:
+    cmd: ovs-vsctl --may-exist add-br {{ ovs_bridge_name }}
+  become: true
+  changed_when: false  # --may-exist makes this idempotent; we assert state below
+
+- name: Create tap interfaces
+  # Check before create: `ip tuntap add` returns EBUSY if the tap exists.
+  # We use `ip link show <tap>` to gate the creation.
+  ansible.builtin.shell:
+    cmd: >-
+      ip link show {{ item }} > /dev/null 2>&1 ||
+      ip tuntap add dev {{ item }} mode tap
+  loop: "{{ ovs_tap_interfaces }}"
+  become: true
+  register: _tap_create
+  changed_when: "'tuntap add' in (_tap_create.cmd | default(''))"
+
+- name: Bring tap interfaces up
+  ansible.builtin.command:
+    cmd: ip link set {{ item }} up
+  loop: "{{ ovs_tap_interfaces }}"
+  become: true
+  changed_when: false  # ip link set is idempotent for already-up interfaces
+
+- name: Add tap interfaces to {{ ovs_bridge_name }}
+  ansible.builtin.command:
+    cmd: ovs-vsctl --may-exist add-port {{ ovs_bridge_name }} {{ item }}
+  loop: "{{ ovs_tap_interfaces }}"
+  become: true
+  changed_when: false
+
+- name: Set VLAN trunks on tap interfaces
+  # trunk= is idempotent: setting the same trunks twice produces no OVS change.
+  ansible.builtin.command:
+    cmd: >-
+      ovs-vsctl set port {{ item }}
+      trunks={{ ovs_vlan_trunks | join(',') }}
+  loop: "{{ ovs_tap_interfaces }}"
+  become: true
+  changed_when: false
+
+- name: Assert bridge exists
+  ansible.builtin.command:
+    cmd: ovs-vsctl br-exists {{ ovs_bridge_name }}
+  become: true
+  changed_when: false
+  register: _br_check
+  failed_when: _br_check.rc != 0

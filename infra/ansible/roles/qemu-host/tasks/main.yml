@@ -1,0 +1,53 @@
+---
+# Tasks for the qemu-host role.
+#
+# Execution order:
+#   1. Assert KVM is available (optional, controlled by qemu_host_assert_kvm).
+#   2. Install packages.
+#   3. Add the lab user to the kvm and libvirt groups.
+#   4. Enable and start libvirtd.
+#
+# Why we add the user to both groups:
+#   - `kvm`     — direct /dev/kvm access for QEMU processes run outside libvirt.
+#   - `libvirt` — access to the libvirt management socket (virsh, virt-install,
+#                 python3-libvirt) without sudo.
+# Group membership takes effect on the next login (or `newgrp`). The lab
+# automation scripts use `sg libvirt -c "..."` when they need it immediately.
+
+- name: Assert KVM device is present
+  ansible.builtin.assert:
+    that:
+      - "'/dev/kvm' is exists"
+    fail_msg: >-
+      /dev/kvm not found. Ensure the host CPU has virtualisation extensions
+      enabled and the kvm_intel/kvm_amd kernel module is loaded. To disable
+      this check set qemu_host_assert_kvm=false.
+  when: qemu_host_assert_kvm | bool
+
+- name: Install QEMU/KVM and libvirt packages
+  ansible.builtin.apt:
+    name: "{{ qemu_host_packages }}"
+    state: present
+    update_cache: true
+  become: true
+
+- name: Add lab user to kvm group
+  ansible.builtin.user:
+    name: "{{ qemu_host_lab_user }}"
+    groups: kvm
+    append: true
+  become: true
+
+- name: Add lab user to libvirt group
+  ansible.builtin.user:
+    name: "{{ qemu_host_lab_user }}"
+    groups: libvirt
+    append: true
+  become: true
+
+- name: Ensure libvirtd is enabled and started
+  ansible.builtin.service:
+    name: libvirtd
+    enabled: true
+    state: started
+  become: true

@@ -1,0 +1,42 @@
+---
+# Role defaults for ovs-harness. Override per-invocation via inventory
+# vars or extra-vars (-e key=value).
+
+# --------------------------------------------------------------------------
+# Bridge configuration.
+# br-test is the single OVS bridge used by all lab VMs. It simulates the
+# ToR switch the real hosts bond against.
+# --------------------------------------------------------------------------
+ovs_bridge_name: "br-test"
+
+# --------------------------------------------------------------------------
+# Bond simulation.
+# LACP bond with balance-tcp emulates the active/active bond0 on real hosts.
+# The bond port aggregates nsa and nsb tap interfaces per VM.
+#
+# Why balance-tcp (not balance-slb):
+#   balance-tcp uses 5-tuple hashing, matching the real LACP config. balance-slb
+#   is simpler but doesn't exercise the same code path as production.
+# --------------------------------------------------------------------------
+ovs_bond_lacp: "active"
+ovs_bond_mode: "balance-tcp"
+
+# --------------------------------------------------------------------------
+# VLAN trunks.
+# All three management VLANs must be trunked through the bond so a VM
+# booting with cloud-init can reach the seed server (VLAN 100) and
+# storage/ingress paths are exercisable.
+# --------------------------------------------------------------------------
+ovs_vlan_trunks:
+  - 100   # mgmt
+  - 200   # storage
+  - 300   # ingress
+
+# --------------------------------------------------------------------------
+# Tap interfaces.
+# Pre-created tap interfaces for the CPU-shaped VM's N-S NICs.
+# E-W (RoCE) taps are added in M5 when gpu-b300 support lands.
+# --------------------------------------------------------------------------
+ovs_tap_interfaces:
+  - tap-nsa
+  - tap-nsb

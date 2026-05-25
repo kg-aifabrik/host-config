@@ -1,0 +1,8 @@
+---
+# Handlers for qemu-host.
+
+- name: Restart libvirtd
+  ansible.builtin.service:
+    name: libvirtd
+    state: restarted
+  listen: restart libvirtd
