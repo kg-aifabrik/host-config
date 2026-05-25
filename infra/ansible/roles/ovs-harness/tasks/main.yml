@@ -73,6 +73,29 @@
   become: true
   changed_when: false
 
+- name: Create E-W tap interfaces (B300 RoCE underlays)
+  # E-W taps are NOT bridged — they connect directly from QEMU to the
+  # simulated E-W fabric (or left unconnected in CPU-only environments).
+  # Skip the block entirely when ovs_ew_tap_interfaces is empty.
+  when: ovs_ew_tap_interfaces | length > 0
+  block:
+    - name: Create E-W tap interfaces
+      ansible.builtin.shell:
+        cmd: >-
+          ip link show {{ item }} > /dev/null 2>&1 ||
+          ip tuntap add dev {{ item }} mode tap
+      loop: "{{ ovs_ew_tap_interfaces }}"
+      become: true
+      register: _ew_tap_create
+      changed_when: "'tuntap add' in (_ew_tap_create.cmd | default(''))"
+
+    - name: Bring E-W tap interfaces up
+      ansible.builtin.command:
+        cmd: ip link set {{ item }} up
+      loop: "{{ ovs_ew_tap_interfaces }}"
+      become: true
+      changed_when: false
+
 - name: Assert bridge exists
   ansible.builtin.command:
     cmd: ovs-vsctl br-exists {{ ovs_bridge_name }}

@@ -61,10 +61,16 @@ _VM_MEMORY_MIB = 2048
 # Number of vCPUs for each test VM.
 _VM_VCPUS = 2
 
-# OVS tap interfaces pre-created by the ovs-harness role (N-S NICs only;
-# E-W taps added in M5).
+# OVS tap interfaces for N-S NICs.
 _TAP_NSA = "tap-nsa"
 _TAP_NSB = "tap-nsb"
+
+# OVS tap interfaces for E-W (RoCE underlay) NICs on the B300 shape.
+# Named tap-gpu0..tap-gpu7, matching the NIC names from the intent.
+_TAP_GPU_FMT = "tap-{nic_name}"  # e.g. "tap-gpu0"
+
+# Number of E-W RoCE NICs on the B300 shape.
+_B300_ROCE_COUNT = 8
 
 
 # ---------------------------------------------------------------------------
@@ -145,8 +151,16 @@ def launch_host(
     path as the production renderer) and constructs the QEMU command line
     deterministically from those MACs plus the supplied parameters.
 
+    Handles both host roles automatically:
+
+    - **CPU** (``Role.CPU``): 2 N-S NICs (nsa, nsb) wired to OVS tap-nsa/tap-nsb.
+    - **B300** (``Role.GPU_B300``): same N-S NICs + 8 E-W RoCE NICs (gpu0..gpu7)
+      each wired to tap-gpu0..tap-gpu7. Tap names are derived via
+      ``_TAP_GPU_FMT``. No VLAN trunk on E-W taps — they are independent
+      L3 underlays.
+
     Args:
-        asset_tag: Netbox asset tag (e.g. ``"SN-CPU-001"``).
+        asset_tag: Netbox asset tag (e.g. ``"SN-CPU-001"`` or ``"SN-GPU-001"``).
         netbox_client: Authenticated ``pynetbox.api`` instance.
         seed_server: Base URL of the seed server, e.g.
             ``"http://10.42.10.1"``. The cloud-init NoCloud source will
@@ -161,7 +175,8 @@ def launch_host(
             in CI where no display is attached).
 
     Returns:
-        A :class:`VMHandle` with the process ID and MAC list.
+        A :class:`VMHandle` with the process ID and MAC list (N-S first,
+        then E-W in name order).
 
     Raises:
         host_config.netbox.errors.HostNotFoundError: Asset tag not in Netbox.
@@ -169,7 +184,7 @@ def launch_host(
         OSError: QEMU binary not found or failed to start.
 
     Approach:
-        1. Load the intent to get N-S NIC MACs (DRY with renderer).
+        1. Load the intent to get all NIC MACs (DRY with renderer).
         2. Build the QEMU cmdline using helper :func:`build_cmdline`.
         3. Spawn the process; return a handle.
     """
@@ -181,6 +196,12 @@ def launch_host(
     nsa_mac = _find_mac(intent, "nsa")
     nsb_mac = _find_mac(intent, "nsb")
 
+    # E-W RoCE NICs (B300 only; sorted by name for determinism).
+    roce_nics: list[tuple[str, str, str]] = []
+    for nic in sorted(intent.roce_underlays, key=lambda n: n.name):
+        tap = _TAP_GPU_FMT.format(nic_name=nic.name)
+        roce_nics.append((nic.name, str(nic.mac), tap))
+
     cmdline = build_cmdline(
         asset_tag=asset_tag,
         seed_server=seed_server,
@@ -189,6 +210,7 @@ def launch_host(
         nsb_mac=nsb_mac,
         tap_nsa=tap_nsa,
         tap_nsb=tap_nsb,
+        roce_nics=roce_nics,
         memory_mib=memory_mib,
         vcpus=vcpus,
         extra_args=extra_qemu_args or [],
@@ -210,18 +232,20 @@ def launch_host(
         start_new_session=True,  # detach from the caller's process group
     )
 
+    all_macs = [nsa_mac, nsb_mac] + [mac for _, mac, _ in roce_nics]
     logger.info(
         "vm.launch.started",
         asset_tag=asset_tag,
         pid=proc.pid,
         nsa_mac=nsa_mac,
         nsb_mac=nsb_mac,
+        roce_nic_count=len(roce_nics),
     )
 
     return VMHandle(
         asset_tag=asset_tag,
         pid=proc.pid,
-        macs=[nsa_mac, nsb_mac],
+        macs=all_macs,
         _proc=proc,
     )
 
@@ -235,6 +259,7 @@ def build_cmdline(
     nsb_mac: str,
     tap_nsa: str,
     tap_nsb: str,
+    roce_nics: list[tuple[str, str, str]] | None = None,
     memory_mib: int = _VM_MEMORY_MIB,
     vcpus: int = _VM_VCPUS,
     extra_args: list[str] | None = None,
@@ -254,6 +279,10 @@ def build_cmdline(
         nsb_mac: MAC for the ``nsb`` virtio NIC (OVS tap).
         tap_nsa: Tap interface name wired to the nsa NIC.
         tap_nsb: Tap interface name wired to the nsb NIC.
+        roce_nics: Optional list of ``(nic_name, mac, tap_iface)`` tuples
+            for E-W RoCE underlay NICs (B300 shape).  Each entry adds one
+            virtio tap NIC with the given MAC.  Pass ``None`` (default)
+            for CPU-shaped VMs.
         memory_mib: VM RAM in MiB.
         vcpus: vCPU count.
         extra_args: Appended verbatim after the generated arguments.
@@ -262,11 +291,13 @@ def build_cmdline(
         List of strings suitable for passing to ``subprocess.Popen``.
 
     Approach:
-        Three virtio NICs are created:
+        NIC assignment:
         - NIC 0 (SLIRP/user): out-of-band mgmt access for the test
           runner; DHCP-assigned by QEMU; no tap needed.
         - NIC 1 (tap-nsa): the ``nsa`` NIC, wired to the OVS bridge.
         - NIC 2 (tap-nsb): the ``nsb`` NIC, wired to the OVS bridge.
+        - NICs 3..10 (B300 only): E-W RoCE NICs, each wired to its
+          own tap (tap-gpu0..tap-gpu7). No VLAN trunk; independent L3.
 
         SMBIOS type=1 sets ``serial=<asset_tag>`` so cloud-init's
         ``DataSourceNoCloud`` reads it as the instance ID.
@@ -304,6 +335,18 @@ def build_cmdline(
         # NIC 2: nsb — wired to the OVS bridge via tap.
         "-netdev", f"tap,id=nsb0,ifname={tap_nsb},script=no,downscript=no",
         "-device", f"virtio-net-pci,netdev=nsb0,mac={nsb_mac}",
+    ]
+
+    # NICs 3..N: E-W RoCE underlay NICs (B300 shape only).
+    # Each uses its own tap interface — no VLAN trunk, independent L3 underlay.
+    for nic_name, mac, tap in (roce_nics or []):
+        netdev_id = f"{nic_name}0"
+        cmd += [
+            "-netdev", f"tap,id={netdev_id},ifname={tap},script=no,downscript=no",
+            "-device", f"virtio-net-pci,netdev={netdev_id},mac={mac}",
+        ]
+
+    cmd += [
         # Suppress display output (headless); use serial console via extra_args
         # if a console is needed.
         "-display", "none",

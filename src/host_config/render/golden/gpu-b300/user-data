@@ -3,3 +3,43 @@ hostname: gpu-b300-01.pod07.site03.internal
 fqdn: gpu-b300-01.pod07.site03.internal
 manage_etc_hosts: true
 preserve_hostname: false
+
+write_files:
+  - path: /etc/security/limits.d/rdma.conf
+    owner: root:root
+    permissions: "0644"
+    content: |
+      # Unlimited locked memory for RDMA / Soft-RoCE (rdma_rxe).
+      # Required for ibv_reg_mr to succeed with large buffers.
+      * hard memlock unlimited
+      * soft memlock unlimited
+
+runcmd:
+  # Load the Soft-RoCE kernel module.
+  - modprobe rdma_rxe
+  # Create one rxe device per east-west NIC, skipping if already present.
+  # Names match the gpu-b300 network-config (gpu0..gpu7 after Netplan renames).
+  - >-
+    rdma link show rxe_gpu0 > /dev/null 2>&1 ||
+    rdma link add rxe_gpu0 type rxe netdev gpu0
+  - >-
+    rdma link show rxe_gpu1 > /dev/null 2>&1 ||
+    rdma link add rxe_gpu1 type rxe netdev gpu1
+  - >-
+    rdma link show rxe_gpu2 > /dev/null 2>&1 ||
+    rdma link add rxe_gpu2 type rxe netdev gpu2
+  - >-
+    rdma link show rxe_gpu3 > /dev/null 2>&1 ||
+    rdma link add rxe_gpu3 type rxe netdev gpu3
+  - >-
+    rdma link show rxe_gpu4 > /dev/null 2>&1 ||
+    rdma link add rxe_gpu4 type rxe netdev gpu4
+  - >-
+    rdma link show rxe_gpu5 > /dev/null 2>&1 ||
+    rdma link add rxe_gpu5 type rxe netdev gpu5
+  - >-
+    rdma link show rxe_gpu6 > /dev/null 2>&1 ||
+    rdma link add rxe_gpu6 type rxe netdev gpu6
+  - >-
+    rdma link show rxe_gpu7 > /dev/null 2>&1 ||
+    rdma link add rxe_gpu7 type rxe netdev gpu7

@@ -182,6 +182,93 @@ class TestBuildCmdline:
         assert cmd_a == cmd_b
 
 
+class TestBuildCmdlineB300:
+    """build_cmdline with 8 E-W RoCE NICs (B300 shape)."""
+
+    # 8 E-W NICs: (nic_name, mac, tap_iface)
+    _ROCE_NICS = [
+        (f"gpu{i}", f"aa:bb:cc:00:00:{0x10 + i:02x}", f"tap-gpu{i}")
+        for i in range(8)
+    ]
+
+    def _b300_cmdline(self, **overrides: object) -> list[str]:
+        kwargs: dict[str, object] = dict(
+            asset_tag=_ASSET_TAG,
+            seed_server=_SEED_SERVER,
+            image_path=_IMAGE,
+            nsa_mac=_NSA_MAC,
+            nsb_mac=_NSB_MAC,
+            tap_nsa=_TAP_NSA,
+            tap_nsb=_TAP_NSB,
+            roce_nics=self._ROCE_NICS,
+        )
+        kwargs.update(overrides)
+        return build_cmdline(**kwargs)  # type: ignore[arg-type]
+
+    @pytest.mark.fast
+    def test_total_nic_count_is_11(self) -> None:
+        """CPU shape = 3 NICs; B300 adds 8 E-W = 11 total NIC entries."""
+        cmd = self._b300_cmdline()
+        device_vals = _collect_flag_values(cmd, "-device")
+        # SLIRP + nsa + nsb + gpu0..7 = 11 virtio-net entries.
+        virtio_nics = [v for v in device_vals if "virtio-net-pci" in v]
+        assert len(virtio_nics) == 11  # noqa: PLR2004
+
+    @pytest.mark.fast
+    def test_each_roce_nic_has_correct_mac(self) -> None:
+        """Each E-W NIC's -device arg carries the right MAC."""
+        cmd = self._b300_cmdline()
+        device_vals = _collect_flag_values(cmd, "-device")
+        for _, mac, _ in self._ROCE_NICS:
+            matching = [v for v in device_vals if mac in v]
+            assert len(matching) == 1, f"MAC {mac} not found exactly once"
+
+    @pytest.mark.fast
+    def test_each_roce_nic_has_correct_tap(self) -> None:
+        """Each E-W NIC's -netdev arg references the right tap interface."""
+        cmd = self._b300_cmdline()
+        netdev_vals = _collect_flag_values(cmd, "-netdev")
+        for _, _, tap in self._ROCE_NICS:
+            matching = [v for v in netdev_vals if f"ifname={tap}" in v]
+            assert len(matching) == 1, f"tap {tap} not found exactly once"
+
+    @pytest.mark.fast
+    def test_no_roce_nics_produces_cpu_shape(self) -> None:
+        """Passing roce_nics=[] (or None) gives the 3-NIC CPU shape."""
+        cmd_none = build_cmdline(
+            asset_tag=_ASSET_TAG,
+            seed_server=_SEED_SERVER,
+            image_path=_IMAGE,
+            nsa_mac=_NSA_MAC,
+            nsb_mac=_NSB_MAC,
+            tap_nsa=_TAP_NSA,
+            tap_nsb=_TAP_NSB,
+            roce_nics=None,
+        )
+        cmd_empty = build_cmdline(
+            asset_tag=_ASSET_TAG,
+            seed_server=_SEED_SERVER,
+            image_path=_IMAGE,
+            nsa_mac=_NSA_MAC,
+            nsb_mac=_NSB_MAC,
+            tap_nsa=_TAP_NSA,
+            tap_nsb=_TAP_NSB,
+            roce_nics=[],
+        )
+        # Both should match the CPU-only baseline.
+        assert cmd_none == cmd_empty
+        device_vals = _collect_flag_values(cmd_none, "-device")
+        virtio_nics = [v for v in device_vals if "virtio-net-pci" in v]
+        assert len(virtio_nics) == 3  # noqa: PLR2004  (SLIRP + nsa + nsb)
+
+    @pytest.mark.fast
+    def test_b300_cmdline_deterministic(self) -> None:
+        """B300 cmdline is deterministic under identical inputs."""
+        cmd_a = self._b300_cmdline()
+        cmd_b = self._b300_cmdline()
+        assert cmd_a == cmd_b
+
+
 # ---------------------------------------------------------------------------
 # Helpers.
 # ---------------------------------------------------------------------------

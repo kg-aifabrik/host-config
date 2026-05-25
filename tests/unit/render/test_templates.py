@@ -143,6 +143,38 @@ class TestGpuB300Templates:
         yaml.safe_load(out)  # must parse — assertion is the lack of exception
 
     @pytest.mark.fast
+    def test_user_data_has_soft_roce_runcmd(self) -> None:
+        """user-data runcmd loads rdma_rxe and creates one rxe device per RoCE NIC."""
+        intent = make_b300_intent()
+        out = _render("gpu-b300", "user-data.j2", intent)
+        parsed = yaml.safe_load(out)
+        runcmd: list[object] = parsed["runcmd"]
+        # First command must load the kernel module.
+        assert runcmd[0] == "modprobe rdma_rxe"
+        # One rdma link add per RoCE NIC (8 NICs → 8 entries, plus the modprobe).
+        rdma_cmds = [c for c in runcmd if isinstance(c, str) and "rdma link add" in c]
+        assert len(rdma_cmds) == len(intent.roce_underlays)
+        # Each rxe device name must reference its NIC.
+        for nic in intent.roce_underlays:
+            assert any(nic.name in str(c) for c in rdma_cmds), (
+                f"No rdma link add for NIC {nic.name!r}"
+            )
+
+    @pytest.mark.fast
+    def test_user_data_has_memlock_write_file(self) -> None:
+        """user-data writes the RDMA memlock limits file."""
+        intent = make_b300_intent()
+        out = _render("gpu-b300", "user-data.j2", intent)
+        parsed = yaml.safe_load(out)
+        write_files: list[dict[str, str]] = parsed["write_files"]
+        rdma_conf = next(
+            (f for f in write_files if f["path"] == "/etc/security/limits.d/rdma.conf"),
+            None,
+        )
+        assert rdma_conf is not None, "rdma.conf write_files entry missing"
+        assert "memlock unlimited" in rdma_conf["content"]
+
+    @pytest.mark.fast
     def test_network_config_has_all_roce_underlays(self) -> None:
         """The 8 RoCE underlay NICs all appear under `ethernets` with SR-IOV VF counts."""
         intent = make_b300_intent()

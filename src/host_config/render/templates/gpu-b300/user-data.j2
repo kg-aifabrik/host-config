@@ -1,12 +1,52 @@
 #cloud-config
-{# user-data — gpu-b300 boot identity.
+{# user-data — gpu-b300 boot identity + Soft-RoCE bring-up.
 
-Mirrors cpu/user-data.j2 for now. The GPU-specific bring-up
-(NVIDIA driver, fabricmanager, MOFED, RoCE QoS) lives in a higher
-layer that runs after first boot — keeping it out of user-data keeps
-this template byte-stable across driver-version churn.
+Soft-RoCE (rdma_rxe) is the RDMA substrate for the lab harness. It
+emulates RDMA verbs over standard Ethernet so we can run RDMA verb
+tests without physical CX-8 / BlueField-3 hardware.
+
+WHY rdma_rxe + rxe devices: The real B300 uses hardware RDMA via
+ConnectX-8 NICs. In the lab we substitute Soft-RoCE (kernel module
+rdma_rxe) and create one rxe_* device per gpu[0..7] NIC. NCCL and
+ibverbs tooling is happy to use rdma_rxe devices without modification.
+
+WHY memlock unlimited: RDMA registration pins memory; the kernel
+enforces a per-process memlock limit. The default (64 KB) is too low
+for any meaningful RDMA buffer. Setting it to unlimited at the system
+level (via /etc/security/limits.d/rdma.conf) is the standard practice
+for RDMA workloads.
+
+WHY runcmd idempotency: `rdma link add` fails if the device already
+exists (exit 1). We check existence first so a re-run or re-image does
+not fail the cloud-init runcmd phase.
+
+WHY keeping GPU-specific packages out of user-data: NVIDIA driver,
+MOFED, and fabricmanager version-pin to the GPU firmware. They are
+installed by a post-boot Ansible run, not here, so this template stays
+byte-stable across driver-version churn.
 #}
 hostname: {{ hostname }}
 fqdn: {{ hostname }}
 manage_etc_hosts: true
 preserve_hostname: false
+
+write_files:
+  - path: /etc/security/limits.d/rdma.conf
+    owner: root:root
+    permissions: "0644"
+    content: |
+      # Unlimited locked memory for RDMA / Soft-RoCE (rdma_rxe).
+      # Required for ibv_reg_mr to succeed with large buffers.
+      * hard memlock unlimited
+      * soft memlock unlimited
+
+runcmd:
+  # Load the Soft-RoCE kernel module.
+  - modprobe rdma_rxe
+  # Create one rxe device per east-west NIC, skipping if already present.
+  # Names match the gpu-b300 network-config (gpu0..gpu7 after Netplan renames).
+{% for nic in roce_underlays %}
+  - >-
+    rdma link show rxe_{{ nic.name }} > /dev/null 2>&1 ||
+    rdma link add rxe_{{ nic.name }} type rxe netdev {{ nic.name }}
+{% endfor %}

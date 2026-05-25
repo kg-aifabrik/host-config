@@ -33,10 +33,28 @@ ovs_vlan_trunks:
   - 300   # ingress
 
 # --------------------------------------------------------------------------
-# Tap interfaces.
-# Pre-created tap interfaces for the CPU-shaped VM's N-S NICs.
-# E-W (RoCE) taps are added in M5 when gpu-b300 support lands.
+# N-S tap interfaces.
+# Pre-created tap interfaces for the N-S NICs (both CPU and B300 shapes).
 # --------------------------------------------------------------------------
 ovs_tap_interfaces:
   - tap-nsa
   - tap-nsb
+
+# --------------------------------------------------------------------------
+# E-W tap interfaces (B300 only).
+# One tap per RoCE underlay NIC (gpu0..gpu7). These taps are NOT attached
+# to the OVS bridge and carry NO VLAN trunk — they are independent L3
+# underlays on the E-W fabric. They are pre-created as bare tap interfaces
+# so the QEMU launcher can reference them by name.
+#
+# Set to [] to skip E-W tap creation (CPU-only environments).
+# --------------------------------------------------------------------------
+ovs_ew_tap_interfaces:
+  - tap-gpu0
+  - tap-gpu1
+  - tap-gpu2
+  - tap-gpu3
+  - tap-gpu4
+  - tap-gpu5
+  - tap-gpu6
+  - tap-gpu7
