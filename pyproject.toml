@@ -8,10 +8,15 @@ authors = [{ name = "Karthik Gajjala", email = "kg@aifabrik.com" }]
 
 # Runtime dependencies. See ADR-0003 (FastAPI + Pydantic + Jinja).
 dependencies = [
+    "fastapi>=0.136.3",
+    "httpx>=0.27",
     "jinja2>=3.1.6",
+    "prometheus-client>=0.20",
     "pydantic>=2.9",
     "pynetbox>=7.4",  # Netbox API client
     "pyyaml>=6.0",    # YAML parsing for fixtures and config
+    "structlog>=25.5.0",
+    "uvicorn>=0.48.0",
 ]
 
 [build-system]
