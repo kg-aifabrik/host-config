@@ -1,0 +1,6 @@
+#cloud-config
+hostname: k8s-cp-01
+fqdn: k8s-cp-01
+manage_etc_hosts: true
+
+preserve_hostname: false

@@ -1,0 +1,5 @@
+#cloud-config
+hostname: gpu-b300-23
+fqdn: gpu-b300-23
+manage_etc_hosts: true
+preserve_hostname: false

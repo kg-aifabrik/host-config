@@ -1,0 +1,113 @@
+network:
+  version: 2
+  renderer: networkd
+
+  ethernets:
+    nsa:
+      match:
+        macaddress: aa:bb:cc:00:00:01
+      set-name: nsa
+      mtu: 9000
+    nsb:
+      match:
+        macaddress: aa:bb:cc:00:00:02
+      set-name: nsb
+      mtu: 9000
+    gpu0:
+      match:
+        macaddress: aa:bb:cc:00:00:10
+      set-name: gpu0
+      mtu: 9000
+      addresses:
+        - 10.42.100.23/24
+      virtual-function-count: 16
+    gpu1:
+      match:
+        macaddress: aa:bb:cc:00:00:11
+      set-name: gpu1
+      mtu: 9000
+      addresses:
+        - 10.42.101.23/24
+      virtual-function-count: 16
+    gpu2:
+      match:
+        macaddress: aa:bb:cc:00:00:12
+      set-name: gpu2
+      mtu: 9000
+      addresses:
+        - 10.42.102.23/24
+      virtual-function-count: 16
+    gpu3:
+      match:
+        macaddress: aa:bb:cc:00:00:13
+      set-name: gpu3
+      mtu: 9000
+      addresses:
+        - 10.42.103.23/24
+      virtual-function-count: 16
+    gpu4:
+      match:
+        macaddress: aa:bb:cc:00:00:14
+      set-name: gpu4
+      mtu: 9000
+      addresses:
+        - 10.42.104.23/24
+      virtual-function-count: 16
+    gpu5:
+      match:
+        macaddress: aa:bb:cc:00:00:15
+      set-name: gpu5
+      mtu: 9000
+      addresses:
+        - 10.42.105.23/24
+      virtual-function-count: 16
+    gpu6:
+      match:
+        macaddress: aa:bb:cc:00:00:16
+      set-name: gpu6
+      mtu: 9000
+      addresses:
+        - 10.42.106.23/24
+      virtual-function-count: 16
+    gpu7:
+      match:
+        macaddress: aa:bb:cc:00:00:17
+      set-name: gpu7
+      mtu: 9000
+      addresses:
+        - 10.42.107.23/24
+      virtual-function-count: 16
+
+  bonds:
+    bond0:
+      interfaces:
+        - nsa
+        - nsb
+      mtu: 9000
+      parameters:
+        mode: 802.3ad
+        lacp-rate: fast
+        transmit-hash-policy: layer3+4
+
+  vlans:
+    bond0.100:
+      id: 100
+      link: bond0
+      mtu: 1500
+      addresses:
+        - 10.42.10.23/24
+      routes:
+        - to: default
+          via: 10.42.10.1
+    bond0.200:
+      id: 200
+      link: bond0
+      mtu: 9000
+      addresses:
+        - 10.42.20.23/24
+    bond0.300:
+      id: 300
+      link: bond0
+      mtu: 1500
+      addresses:
+        - 10.42.30.23/24
