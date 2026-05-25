@@ -34,3 +34,5 @@ The eleven seed ADRs landing in M0-4:
 - `0011` — Systems overview: component catalog + interactions + SVG diagrams
 
 Later ADRs land as decisions cross the bar.
+
+- `0012` — Deferred signed-seed delivery (TLS + HMAC): v1 serves seeds over plain HTTP on the management VLAN; TLS placeholder in nginx config reserved for promotion to production

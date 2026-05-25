@@ -92,3 +92,72 @@ server {
         proxy_set_header X-Forwarded-Proto $scheme;
     }
 }
+
+# =============================================================================
+# TLS PLACEHOLDER (ADR-0012 — deferred signed-seed delivery)
+#
+# This block is DISABLED (commented out). It documents what a production-grade
+# TLS termination configuration would look like when the management VLAN
+# boundary can no longer be relied on as the sole security control.
+#
+# To enable:
+#   1. Provision a cert + key (self-signed for lab, smallstep step-ca for prod).
+#   2. Set nginx_cache_tls_cert and nginx_cache_tls_key inventory vars pointing
+#      to the PEM files on the seed server.
+#   3. Uncomment this block and set nginx_cache_listen_port to 443 (or add a
+#      second listen directive on :443 to the HTTP block above).
+#   4. Add an HTTP → HTTPS redirect server block if needed.
+#   5. If using mTLS: add `ssl_verify_client on;` and point `ssl_client_certificate`
+#      at the CA bundle (e.g. smallstep root CA cert).
+#
+# See also: docs/adr/0012-deferred-signed-seed-delivery.md
+# =============================================================================
+#
+# server {
+#     listen 443 ssl;
+#     server_name {{ nginx_cache_server_name }};
+#
+#     ssl_certificate     /etc/nginx/tls/seed-server.crt;
+#     ssl_certificate_key /etc/nginx/tls/seed-server.key;
+#     ssl_protocols       TLSv1.2 TLSv1.3;
+#     ssl_ciphers         HIGH:!aNULL:!MD5;
+#     ssl_session_cache   shared:SSL:10m;
+#     ssl_session_timeout 1d;
+#
+#     # Optional: mutual TLS — require client cert signed by the lab CA.
+#     # ssl_verify_client      on;
+#     # ssl_client_certificate /etc/nginx/tls/ca.crt;
+#
+#     access_log {{ nginx_cache_access_log }};
+#     error_log  {{ nginx_cache_error_log }} {{ nginx_cache_log_level }};
+#
+#     location /v1/ {
+#         proxy_pass {{ nginx_cache_renderer_upstream }};
+#
+#         proxy_cache              seedcache;
+#         proxy_cache_valid        200 {{ nginx_cache_valid_seconds }}s;
+#         proxy_cache_use_stale    error timeout updating http_500 http_502 http_503 http_504;
+#         proxy_cache_lock         on;
+#         proxy_cache_lock_timeout 5s;
+#
+#         add_header X-Cache-Status $upstream_cache_status always;
+#         proxy_pass_header ETag;
+#         proxy_pass_header Last-Modified;
+#
+#         proxy_set_header Host              $host;
+#         proxy_set_header X-Real-IP         $remote_addr;
+#         proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+#         proxy_set_header X-Forwarded-Proto https;
+#     }
+#
+#     location {{ nginx_cache_purge_path }}/ {
+#         limit_except PURGE { deny all; }
+#         proxy_pass {{ nginx_cache_renderer_upstream }};
+#         proxy_cache_purge seedcache $scheme$host$request_uri;
+#     }
+#
+#     location ~ ^/(healthz|readyz|metrics)$ {
+#         proxy_pass {{ nginx_cache_renderer_upstream }};
+#         proxy_cache off;
+#     }
+# }
