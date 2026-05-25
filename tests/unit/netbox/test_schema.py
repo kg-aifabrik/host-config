@@ -139,10 +139,17 @@ class TestDefaultFieldsCatalog:
         assert len(names) == len(set(names))
 
     @pytest.mark.fast
-    def test_bf3_mode_choices_match_constant(self) -> None:
-        """The BF3 mode field declares the same choices as the BF3_MODES constant."""
+    def test_bf3_mode_is_text_field(self) -> None:
+        """bf3_mode is a TEXT field (not SELECT); allowed values enforced at the loader layer.
+
+        Netbox 4.x decouples SELECT choices into separate ChoiceSet objects;
+        storing as TEXT and validating in Python keeps the schema simple.
+        """
         bf3 = next(f for f in DEFAULT_FIELDS if f.name == "bf3_mode")
-        assert bf3.choices == BF3_MODES
+        assert bf3.type == FieldType.TEXT
+        # The BF3_MODES constant is still the source of truth for allowed values,
+        # used by the loader's enum / validation.
+        assert BF3_MODES == ["nic", "dpu", "separated-host"]
 
     @pytest.mark.fast
     def test_each_field_renders_valid_payload(self) -> None:

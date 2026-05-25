@@ -319,6 +319,7 @@ source = { editable = "." }
 dependencies = [
     { name = "pydantic" },
     { name = "pynetbox" },
+    { name = "pyyaml" },
 ]
 
 [package.dev-dependencies]
@@ -337,6 +338,7 @@ dev = [
 requires-dist = [
     { name = "pydantic", specifier = ">=2.9" },
     { name = "pynetbox", specifier = ">=7.4" },
+    { name = "pyyaml", specifier = ">=6.0" },
 ]
 
 [package.metadata.requires-dev]

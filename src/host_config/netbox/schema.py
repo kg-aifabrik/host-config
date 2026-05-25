@@ -163,18 +163,20 @@ BF3_MODES = ["nic", "dpu", "separated-host"]
 
 
 DEFAULT_FIELDS: list[CustomFieldSpec] = [
+    # WHY TEXT not SELECT: Netbox 4.x decouples SELECT-field choices into
+    # a separate ChoiceSet object. Storing as TEXT and validating the
+    # allowed values at the loader's Pydantic layer (Role enum-equivalent)
+    # is materially simpler without losing safety. Allowed values are the
+    # `BF3_MODES` constant; the loader rejects anything else.
     CustomFieldSpec(
         name="bf3_mode",
         label="BlueField-3 mode",
-        type=FieldType.SELECT,
+        type=FieldType.TEXT,
         object_types=["dcim.device"],
         description=(
-            "Operating mode of the host's BlueField-3 DPUs. "
-            "v1 uses 'nic' (Arm cores quiesced). 'dpu' and 'separated-host' "
-            "are reserved for future deployments per the bf-3 caveat in "
-            "the host-net-config research doc."
+            "Operating mode of host's BF-3 DPUs. Allowed: "
+            "nic | dpu | separated-host. v1 lab uses 'nic'."
         ),
-        choices=BF3_MODES,
         default="nic",
     ),
     CustomFieldSpec(
@@ -220,10 +222,8 @@ DEFAULT_FIELDS: list[CustomFieldSpec] = [
         type=FieldType.TEXT,
         object_types=["dcim.interface"],
         description=(
-            "MAC last reported by discovery. Drift detection: a value "
-            "that disagrees with the canonical 'mac_address' field is "
-            "a signal that the NIC was replaced or the inventory is "
-            "stale."
+            "MAC last reported by discovery. Disagreement with the "
+            "canonical mac_address signals NIC replacement or stale inventory."
         ),
     ),
     CustomFieldSpec(

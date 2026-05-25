@@ -1,0 +1,70 @@
+# CPU host fixture — for k8s control-plane / jumphost / bootstrap-appliance role.
+#
+# Used by:
+#   - unit tests (mocked Netbox; YAML is loaded but no API calls)
+#   - component tests (populated into a real Netbox container)
+#   - the M2.5 gate (renderer → HostIntent → cloud-init for this host)
+#
+# Deterministic identifiers — these MUST match what the renderer's
+# expected golden files reference. If you change anything below,
+# update the goldens and HostIntent test fixtures accordingly.
+
+asset_tag: SN-CPU-001
+hostname: k8s-cp-01.pod07.site03.internal
+device_role: cpu               # Netbox DeviceRole slug
+site: site03                   # Netbox Site slug
+
+device_type:
+  manufacturer: Dell
+  model: PowerEdge R660
+  slug: poweredge-r660
+  u_height: 1
+
+# Device-level custom fields. (cpu role has no BF-3, so bf3_mode is unset.)
+device_custom_fields: {}
+
+# VLANs required by this host's interfaces. Created (or reused) per site.
+vlans:
+  - vid: 100
+    name: mgmt
+  - vid: 200
+    name: storage
+  - vid: 300
+    name: ingress
+
+interfaces:
+  - name: nsa
+    type: 200gbase-x-qsfp56
+    mac: aa:bb:cc:00:01:01
+    mtu: 9000
+
+  - name: nsb
+    type: 200gbase-x-qsfp56
+    mac: aa:bb:cc:00:01:02
+    mtu: 9000
+
+  - name: bond0
+    type: lag
+    mtu: 9000
+    lag_members: [nsa, nsb]
+
+  - name: bond0.100
+    type: virtual
+    mtu: 1500
+    parent: bond0
+    untagged_vlan: 100
+    ip: 10.42.10.11/24
+
+  - name: bond0.200
+    type: virtual
+    mtu: 9000
+    parent: bond0
+    untagged_vlan: 200
+    ip: 10.42.20.11/24
+
+  - name: bond0.300
+    type: virtual
+    mtu: 1500
+    parent: bond0
+    untagged_vlan: 300
+    ip: 10.42.30.11/24
