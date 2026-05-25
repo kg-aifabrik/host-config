@@ -71,6 +71,27 @@ just lab-test
 Runs `pytest -m e2e` on the Droplet over SSH. Tests marked `@requires_kvm`
 skip automatically if `/dev/kvm` is absent.
 
+## Canonical acceptance test (M6.5-1)
+
+The full end-to-end acceptance test for the host-config project:
+
+```bash
+just lab       # up → test → down; trap ensures teardown on any exit
+```
+
+Expected outcome on `s-4vcpu-8gb-amd` with `/dev/kvm` present:
+- `test_cpu_host_boot.py` (M4.5-1): all 12 assertions pass — bond0 LACP,
+  VLAN IPs + MTUs, default route, nsa/nsb enslaved.
+- `test_b300_host_boot.py` (M5.5-1): all 12 assertions pass — bond0 UP,
+  VLAN IPs, 8× gpu0..7 at MTU 9000, rdma_rxe loaded, 8 rxe devices,
+  rping between rxe_gpu0 ↔ rxe_gpu1.
+
+If `/dev/kvm` is absent (Droplet shape doesn't expose it), tests marked
+`@requires_kvm` skip automatically; the test run still exits 0.
+
+**Total run time:** ~25–35 minutes wall-clock.  
+**Cost per burn:** $0.04–$0.07 (see cost table below).
+
 ## Teardown
 
 ```bash
@@ -81,8 +102,52 @@ Deletes the Droplet and verifies zero residual resources with the
 `host-config-lab` tag via the DO API (see `destroy.yml`). Leaves no
 trace on your DO account.
 
-Or let `just lab` do it for you — it wraps `up → test → down` with a
-`trap` so teardown runs even if the tests fail or you hit Ctrl-C.
+`just lab` wraps `up → test → down` with `trap 'just lab-down' EXIT INT TERM`
+so teardown runs even if the tests fail or you hit Ctrl-C.
+
+## Teardown integrity (M6.5-2)
+
+Principle #11 (leave no trace): every cycle must start and end with
+zero `host-config-lab`-tagged DO resources.
+
+**Automated check** (runs in the E2E suite when `DIGITALOCEAN_TOKEN` and
+`doctl` are present):
+
+```bash
+pytest tests/e2e/test_do_teardown.py -v
+```
+
+The test suite:
+1. Asserts zero tagged Droplets/volumes/snapshots at the start.
+2. Runs `just lab-down` (idempotent on clean state) and re-asserts zero.
+3. Calls `just lab-down` twice to verify idempotent destroy.
+
+**Manual inventory check** (before and after a `just lab` cycle):
+
+```bash
+# Before.
+doctl compute droplet list --tag-name host-config-lab
+doctl compute volume list
+doctl compute snapshot list
+
+# After just lab completes.
+doctl compute droplet list --tag-name host-config-lab  # must be empty
+```
+
+**Failure path (trap verification):**
+
+To manually verify the trap fires on failure:
+
+```bash
+# Start a lab-up, kill it partway through, then verify lab-down cleans up.
+just lab-up &
+LAB_PID=$!
+sleep 60          # let provisioning start
+kill $LAB_PID
+sleep 5
+just lab-down     # must exit 0 and leave zero resources
+doctl compute droplet list --tag-name host-config-lab  # must be empty
+```
 
 ## Estimated cost
 
