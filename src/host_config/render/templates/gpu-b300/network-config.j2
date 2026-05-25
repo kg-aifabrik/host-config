@@ -1,0 +1,83 @@
+{# network-config — Netplan v2, gpu-b300 role.
+
+Adds to the CPU shape:
+  - 8 RoCE underlay NICs (gpu0..gpu7), each with its own /31 (or /30)
+    address on the E-W fabric. No bond — RoCE traffic is steered by
+    GPU affinity, one NIC per GPU.
+  - Each RoCE NIC declares `virtual-function-count` so Netplan asks
+    the kernel to allocate the SR-IOV VFs the GPU stack will claim
+    later.
+
+WHY: RoCE NICs do NOT join bond0. Bonding RoCE underlays would defeat
+the per-GPU steering NCCL relies on. They appear at the top level
+under `ethernets:` alongside the N-S NICs but with separate match
+clauses (their own MACs).
+
+WHY: We don't emit a default route on RoCE interfaces — those are
+strictly East-West. Routing to RoCE peers happens via the fabric's
+ECMP, not via the host's routing table. The mgmt VLAN remains the
+only default-gateway path.
+#}
+network:
+  version: 2
+  renderer: networkd
+
+  ethernets:
+{% for nic in ns_nics %}
+    {{ nic.name }}:
+      match:
+        macaddress: {{ nic.mac }}
+      set-name: {{ nic.name }}
+      mtu: {{ nic.mtu }}
+{% endfor %}
+{% for nic in roce_underlays %}
+    {{ nic.name }}:
+      match:
+        macaddress: {{ nic.mac }}
+      set-name: {{ nic.name }}
+      mtu: {{ nic.mtu }}
+      addresses:
+        - {{ nic.address }}
+      {# WHY: Netplan v2 exposes SR-IOV via `virtual-function-count`.
+         The renderer pulls this from the RoceUnderlay's sriov_vfs
+         field (validated 0..128 in the model). #}
+      virtual-function-count: {{ nic.sriov_vfs }}
+{% endfor %}
+
+  bonds:
+    {{ bond.name }}:
+      interfaces:
+{% for member in bond.members %}
+        - {{ member }}
+{% endfor %}
+      mtu: {{ bond.mtu }}
+      parameters:
+        mode: {{ bond.mode }}
+        lacp-rate: {{ bond.lacp_rate }}
+        transmit-hash-policy: {{ bond.transmit_hash_policy }}
+
+  vlans:
+{% for vlan in vlans %}
+    {{ vlan.name }}:
+      id: {{ vlan.vlan_id }}
+      link: {{ vlan.parent }}
+      mtu: {{ vlan.mtu }}
+      addresses:
+        - {{ vlan.address }}
+{% if vlan.gateway is not none %}
+      routes:
+        - to: default
+          via: {{ vlan.gateway }}
+{% endif %}
+{% if vlan.dns %}
+      nameservers:
+        addresses:
+{% for ns in vlan.dns %}
+          - {{ ns }}
+{% endfor %}
+{% if vlan.search_domain is not none %}
+        search:
+          - {{ vlan.search_domain }}
+{% endif %}
+{% endif %}
+{% endfor %}

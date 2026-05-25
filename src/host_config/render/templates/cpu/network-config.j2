@@ -1,0 +1,70 @@
+{# network-config — Netplan v2 schema, consumed by cloud-init.
+
+WHY: cloud-init's network-config v2 is the same schema as Netplan.
+Shipping it here means we never need a separate Netplan file — the
+single source of truth is this template's output. The kernel sees the
+configured interfaces at first boot.
+
+The CPU role has:
+  - 2 physical NICs (nsa, nsb) bonded as bond0 (LACP, 802.3ad)
+  - 3 VLAN children on bond0 (mgmt/storage/ingress)
+  - No SR-IOV, no RoCE underlays.
+
+WHY: We use match-by-MAC rather than match-by-name. NIC kernel names
+(eno1, ens5f0, …) shift between firmware versions and hardware revs;
+MACs are stable identifiers carried in Netbox. The `set-name` directive
+renames the kernel device to our canonical name (nsa / nsb).
+#}
+network:
+  version: 2
+  renderer: networkd
+
+  ethernets:
+{% for nic in ns_nics %}
+    {{ nic.name }}:
+      match:
+        macaddress: {{ nic.mac }}
+      set-name: {{ nic.name }}
+      mtu: {{ nic.mtu }}
+{% endfor %}
+
+  bonds:
+    {{ bond.name }}:
+      interfaces:
+{% for member in bond.members %}
+        - {{ member }}
+{% endfor %}
+      mtu: {{ bond.mtu }}
+      parameters:
+        mode: {{ bond.mode }}
+        lacp-rate: {{ bond.lacp_rate }}
+        transmit-hash-policy: {{ bond.transmit_hash_policy }}
+
+  vlans:
+{% for vlan in vlans %}
+    {{ vlan.name }}:
+      id: {{ vlan.vlan_id }}
+      link: {{ vlan.parent }}
+      mtu: {{ vlan.mtu }}
+      addresses:
+        - {{ vlan.address }}
+{% if vlan.gateway is not none %}
+      {# WHY: Netplan v2 dropped `gateway4`; routes-with-to-default is the
+         current way to declare a default route. The renderer enforces
+         "exactly one VLAN has a gateway" — guaranteed to be mgmt. #}
+      routes:
+        - to: default
+          via: {{ vlan.gateway }}
+{% endif %}
+{% if vlan.dns %}
+      nameservers:
+        addresses:
+{% for ns in vlan.dns %}
+          - {{ ns }}
+{% endfor %}
+{% if vlan.search_domain is not none %}
+        search:
+          - {{ vlan.search_domain }}
+{% endif %}
+{% endif %}
+{% endfor %}

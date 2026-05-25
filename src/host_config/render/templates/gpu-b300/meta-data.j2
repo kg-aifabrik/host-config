@@ -1,0 +1,9 @@
+{# meta-data — same shape as cpu/meta-data.j2.
+
+WHY: kept as a per-role copy (not a shared template) because the
+acceptance criterion for M2-3 is "one tree per role" — a future role
+may need to override identity fields (e.g., an instance-id namespace
+per deployment cohort) without coordinating with other roles.
+#}
+instance-id: {{ asset_tag }}
+local-hostname: {{ hostname }}

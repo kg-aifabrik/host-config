@@ -1,0 +1,13 @@
+{# meta-data — NoCloud datasource identity payload.
+
+WHY: cloud-init's NoCloud datasource keys on instance-id to decide
+whether to re-run "once-per-instance" modules. We use the asset_tag
+(stable across reimages) so re-imaging a host runs the boot-strap
+steps again, but a reboot does not.
+
+WHY: local-hostname is what gets written to /etc/hostname and used as
+the kernel hostname. We pass the FQDN; cloud-init's hostname module
+splits the short name itself.
+#}
+instance-id: {{ asset_tag }}
+local-hostname: {{ hostname }}

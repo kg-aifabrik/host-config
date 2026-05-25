@@ -1,0 +1,12 @@
+#cloud-config
+{# user-data — gpu-b300 boot identity.
+
+Mirrors cpu/user-data.j2 for now. The GPU-specific bring-up
+(NVIDIA driver, fabricmanager, MOFED, RoCE QoS) lives in a higher
+layer that runs after first boot — keeping it out of user-data keeps
+this template byte-stable across driver-version churn.
+#}
+hostname: {{ hostname }}
+fqdn: {{ hostname }}
+manage_etc_hosts: true
+preserve_hostname: false

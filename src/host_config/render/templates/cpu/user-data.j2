@@ -1,0 +1,20 @@
+#cloud-config
+{# user-data — first-boot configuration.
+
+WHY: cloud-init requires the first line to be the literal "#cloud-config"
+marker (not a YAML comment — a magic shebang-like header). Anything
+before that line breaks parsing.
+
+WHY: We keep user-data minimal for the cpu role. The heavy lifting
+(package installs, k8s join, etc.) is the next layer's concern; this
+template only sets the host's identity so it can be reached and the
+next layer can SSH in.
+#}
+hostname: {{ hostname }}
+fqdn: {{ hostname }}
+manage_etc_hosts: true
+
+{# WHY: preserve_hostname=false lets cloud-init rewrite /etc/hostname
+   on every boot. With true, a hostname change in Netbox would not
+   propagate without manual intervention. #}
+preserve_hostname: false
