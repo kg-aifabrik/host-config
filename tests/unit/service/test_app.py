@@ -21,6 +21,7 @@ Coverage:
 from __future__ import annotations
 
 import uuid
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
@@ -92,7 +93,7 @@ def _build_client(
                 raise loader_result
             return loader_result
 
-        routes_mod.load_host_intent = fake_loader  # type: ignore[assignment,attr-defined]
+        routes_mod.load_host_intent = fake_loader  # type: ignore[assignment]
 
     client = TestClient(app)
     # Override dependency too — defense in depth (some routes use the
@@ -104,6 +105,24 @@ def _build_client(
 # ---------------------------------------------------------------------------
 # Happy path: each render route returns the matching golden.
 # ---------------------------------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def _restore_loader() -> Iterator[None]:
+    """Ensure the loader monkey-patch is always restored after each test.
+
+    Why:
+        `_build_client` patches `routes_mod.load_host_intent` globally.
+        Without this fixture the patch leaks across tests — and across
+        the test session boundary into integration tests that run after
+        the unit suite. The fixture saves the original before each test
+        and restores it in `finally` so even a failing test can't leak.
+    """
+    original = routes_mod.load_host_intent
+    try:
+        yield
+    finally:
+        routes_mod.load_host_intent = original
 
 
 class TestRenderRoutesHappy:
@@ -269,3 +288,84 @@ class TestOpenApi:
         c = _build_client(loader_result=make_cpu_intent())
         resp = c.get("/docs")
         assert resp.status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# Cache headers (M3-3).
+# ---------------------------------------------------------------------------
+
+
+class TestCacheHeaders:
+    """Render responses carry Cache-Control, ETag, and Last-Modified headers.
+
+    Why these three headers matter:
+        nginx's `proxy_cache` relies on `Cache-Control: max-age` to know
+        how long to serve from cache. `ETag` enables conditional GETs
+        (`If-None-Match`) so a revalidation round-trip is a 304 with no
+        body, not a full re-render. `Last-Modified` is the fallback for
+        clients that don't support ETags.
+    """
+
+    @pytest.mark.fast
+    def test_render_route_carries_cache_control(self) -> None:
+        """Successful render responses include `Cache-Control: public, max-age=300`."""
+        c = _build_client(loader_result=make_cpu_intent())
+        resp = c.get("/v1/render/SN-CPU-001/meta-data")
+        assert resp.status_code == 200
+        assert "public" in resp.headers["cache-control"]
+        assert "max-age=300" in resp.headers["cache-control"]
+
+    @pytest.mark.fast
+    def test_render_route_carries_etag(self) -> None:
+        """Successful render responses include an `ETag` header."""
+        c = _build_client(loader_result=make_cpu_intent())
+        resp = c.get("/v1/render/SN-CPU-001/meta-data")
+        assert resp.status_code == 200
+        assert "ETag" in resp.headers
+
+    @pytest.mark.fast
+    def test_etag_is_stable_across_identical_renders(self) -> None:
+        """Two renders of the same intent produce the same ETag.
+
+        Why:
+            If ETags drift for identical output, nginx can't revalidate
+            correctly — every conditional GET would miss and cause a
+            full re-render.
+        """
+        c = _build_client(loader_result=make_cpu_intent())
+        e1 = c.get("/v1/render/SN-CPU-001/meta-data").headers["ETag"]
+        # Rebuild client (and thus app/stub) to rule out any in-memory state.
+        c2 = _build_client(loader_result=make_cpu_intent())
+        e2 = c2.get("/v1/render/SN-CPU-001/meta-data").headers["ETag"]
+        assert e1 == e2
+
+    @pytest.mark.fast
+    def test_render_route_carries_last_modified(self) -> None:
+        """Render responses include a `Last-Modified` header."""
+        c = _build_client(loader_result=make_cpu_intent())
+        resp = c.get("/v1/render/SN-CPU-001/meta-data")
+        assert "Last-Modified" in resp.headers
+
+    @pytest.mark.fast
+    def test_operational_endpoints_have_no_cache_control(self) -> None:
+        """/healthz and /readyz must NOT carry `Cache-Control: public`.
+
+        Why:
+            A cached 200 /readyz would mask a Netbox outage from the
+            orchestrator's health check. Operational endpoints must
+            always be fresh.
+        """
+        c = _build_client(loader_result=make_cpu_intent())
+        for path in ("/healthz", "/readyz"):
+            resp = c.get(path)
+            cc = resp.headers.get("cache-control", "")
+            assert "public" not in cc, f"{path} must not carry public cache-control"
+
+    @pytest.mark.fast
+    def test_error_response_has_no_cache_control(self) -> None:
+        """A 404 response carries no `Cache-Control: public` (errors must not be cached)."""
+        c = _build_client(loader_result=HostNotFoundError("SN-MISSING"))
+        resp = c.get("/v1/render/SN-MISSING/meta-data")
+        assert resp.status_code == 404
+        cc = resp.headers.get("cache-control", "")
+        assert "public" not in cc

@@ -1,6 +1,6 @@
 """HTTP middleware for the renderer service.
 
-Two pieces of cross-cutting plumbing:
+Three pieces of cross-cutting plumbing:
 
 - **Request-ID middleware** — every request gets a UUIDv4 (or honors a
   caller-supplied ``X-Request-Id`` if it looks like a UUID, so an
@@ -12,19 +12,47 @@ Two pieces of cross-cutting plumbing:
   context is attached before the route handler runs and cleared in
   the same `finally` block. structlog's `bind_contextvars` /
   `clear_contextvars` are async-safe via contextvars.
+
+- **Cache headers** — responses to `/v1/render/…` routes get
+  ``Cache-Control: public, max-age=300``, ``ETag`` (SHA-256 of the
+  body, hex-encoded), and ``Last-Modified`` (service start time,
+  stable across requests for the same body). These headers let nginx's
+  ``proxy_cache`` (M3-1) and any downstream HTTP cache revalidate
+  efficiently without a round-trip to the renderer.
+
+  Why SHA-256 (not BLAKE3):
+      BLAKE3 is faster but requires a third-party package. SHA-256 is
+      in stdlib, acceptable latency for ~1 KB payloads, and widely
+      supported by HTTP intermediaries. Switch to BLAKE3 via ADR if
+      benchmarking shows it matters.
 """
 
 from __future__ import annotations
 
+import hashlib
 import time
 import uuid
 from collections.abc import Awaitable, Callable
+from email.utils import formatdate
 
 import structlog
 from fastapi import Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware
 
 REQUEST_ID_HEADER = "X-Request-Id"
+
+# The service start-time is used as `Last-Modified` for render responses.
+# It's stable for the lifetime of the process: every host that renders a
+# config during this run gets the same Last-Modified, so a `304 Not
+# Modified` cache revalidation works correctly for a given service
+# deployment.
+_SERVICE_START_RFC_HTTP = formatdate(time.time(), usegmt=True)
+
+# Only render routes get cache headers — operational endpoints (/healthz,
+# /readyz, /metrics) must never be cached.
+_CACHE_ROUTE_PREFIX = "/v1/render/"
+_CACHE_MAX_AGE = 300  # seconds — matches nginx's proxy_cache_valid 200 5m
+
 logger = structlog.get_logger(__name__)
 
 
@@ -42,6 +70,35 @@ def _coerce_request_id(raw: str | None) -> str:
         except (ValueError, TypeError):
             pass
     return str(uuid.uuid4())
+
+
+def _inject_cache_headers(request: Request, response: Response) -> None:
+    """Add cache-control headers to successful render responses.
+
+    Only `/v1/render/…` routes get cache headers. The ETag is the
+    SHA-256 of the body so nginx can do conditional GETs efficiently
+    without re-rendering. Last-Modified is the service start time —
+    stable per deployment, deterministic for the same body.
+
+    Why not set Cache-Control on errors:
+        A 404 or 502 could be transient (host not yet in Netbox, Netbox
+        restarting). Caching errors would hide the recovery. Only 200
+        responses carry public cache headers.
+    """
+    if not request.url.path.startswith(_CACHE_ROUTE_PREFIX):
+        return
+    if response.status_code != 200:  # noqa: PLR2004
+        return
+    # `Response.body` is the bytes set at construction time. This is
+    # always available for our plain `Response(content=..., ...)` returns.
+    # StreamingResponse wouldn't have `.body`, but our render routes never
+    # stream (payloads are <4 KB). Using getattr defensively so the
+    # middleware doesn't crash on unexpected response subclasses.
+    raw_body: bytes = getattr(response, "body", b"")
+    etag = hashlib.sha256(raw_body).hexdigest()
+    response.headers["Cache-Control"] = f"public, max-age={_CACHE_MAX_AGE}"
+    response.headers["ETag"] = f'"{etag}"'
+    response.headers["Last-Modified"] = _SERVICE_START_RFC_HTTP
 
 
 class RequestContextMiddleware(BaseHTTPMiddleware):
@@ -89,6 +146,7 @@ class RequestContextMiddleware(BaseHTTPMiddleware):
                 elapsed_ms=round(elapsed_ms, 2),
             )
             response.headers[REQUEST_ID_HEADER] = request_id
+            _inject_cache_headers(request, response)
             return response
         finally:
             structlog.contextvars.clear_contextvars()

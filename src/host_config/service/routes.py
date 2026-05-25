@@ -113,3 +113,6 @@ async def readyz(client: NetboxClient) -> dict[str, str]:
 async def metrics() -> Response:
     """Prometheus scrape endpoint."""
     return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)
+
+
+__all__ = ["api", "load_host_intent", "ops"]
