@@ -1,0 +1,80 @@
+---
+# Tasks for the nginx-cache role.
+#
+# Execution order matters:
+#   1. Install nginx (system package, idempotent).
+#   2. Create cache directory before writing the config (nginx validates the
+#      path at reload time; if the directory doesn't exist nginx refuses to
+#      start).
+#   3. Deploy the config (Jinja-rendered).
+#   4. Validate the rendered config with `nginx -t` before notifying the
+#      reload handler — catches template bugs without taking nginx down.
+#   5. Enable + start nginx (idempotent; no-op if already running).
+
+- name: Install nginx
+  ansible.builtin.apt:
+    name: nginx
+    state: present
+    update_cache: true
+  become: true
+
+- name: Create cache directory
+  ansible.builtin.file:
+    path: "{{ nginx_cache_path }}"
+    state: directory
+    owner: www-data
+    group: www-data
+    mode: "0750"
+  become: true
+
+- name: Create log directory
+  ansible.builtin.file:
+    path: "{{ nginx_cache_access_log | dirname }}"
+    state: directory
+    owner: www-data
+    group: adm
+    mode: "0755"
+  become: true
+
+- name: Remove default nginx site
+  ansible.builtin.file:
+    path: /etc/nginx/sites-enabled/default
+    state: absent
+  become: true
+  notify: reload nginx
+
+- name: Deploy nginx cache config
+  ansible.builtin.template:
+    src: nginx.conf.j2
+    dest: /etc/nginx/sites-available/host-config-cache.conf
+    owner: root
+    group: root
+    mode: "0644"
+  become: true
+  notify: reload nginx
+
+- name: Enable nginx cache site
+  ansible.builtin.file:
+    src: /etc/nginx/sites-available/host-config-cache.conf
+    dest: /etc/nginx/sites-enabled/host-config-cache.conf
+    state: link
+  become: true
+  notify: reload nginx
+
+- name: Validate nginx configuration
+  # Run nginx -t after the site is symlinked so the full include tree
+  # is present. This catches Jinja render bugs before the reload handler
+  # fires. Using `changed_when: false` because validation is read-only.
+  ansible.builtin.command: nginx -t
+  become: true
+  changed_when: false
+
+- name: Ensure nginx is enabled and started
+  ansible.builtin.service:
+    name: nginx
+    enabled: true
+    state: started
+  become: true
+
+- name: Flush handlers
+  ansible.builtin.meta: flush_handlers

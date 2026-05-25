@@ -1,0 +1,19 @@
+---
+# Handlers for the nginx-cache role.
+#
+# Why reload over restart:
+#   `nginx -s reload` re-reads configuration and hot-swaps workers with zero
+#   downtime. A full restart would briefly close TCP connections; since cloud-init
+#   may be retrying during boot storms, a dropped connection forces another RTT.
+
+- name: Reload nginx
+  ansible.builtin.service:
+    name: nginx
+    state: reloaded
+  listen: reload nginx
+
+- name: Restart nginx
+  ansible.builtin.service:
+    name: nginx
+    state: restarted
+  listen: restart nginx

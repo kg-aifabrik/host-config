@@ -1,0 +1,18 @@
+---
+galaxy_info:
+  role_name: nginx_cache
+  author: host-config
+  description: >
+    Deploy an nginx caching reverse-proxy in front of the host-config renderer.
+    Caches /v1/render/* responses for 5 minutes (matching the renderer's
+    Cache-Control: max-age=300) and exposes a PURGE location for cache
+    invalidation.
+  license: MIT
+  min_ansible_version: "2.15"
+  platforms:
+    - name: Ubuntu
+      versions:
+        - jammy
+        - noble
+
+dependencies: []

@@ -1,0 +1,53 @@
+---
+# Role defaults for nginx-cache. Override per-invocation via inventory
+# vars or extra-vars (-e key=value).
+
+# --------------------------------------------------------------------------
+# Renderer upstream.
+# The renderer's host:port; nginx proxies /v1/ requests here.
+# --------------------------------------------------------------------------
+nginx_cache_renderer_upstream: "http://127.0.0.1:8080"
+
+# --------------------------------------------------------------------------
+# Cache parameters.
+# These mirror cloud-init's re-fetch behaviour: a host requests its
+# seed files once per boot, with a 5-minute TTL covering the typical
+# case where multiple hosts in the same rack boot concurrently.
+# --------------------------------------------------------------------------
+# Disk path for the cache. Must be on a filesystem with enough space
+# for max_size.
+nginx_cache_path: "/var/cache/host-config/seeds"
+
+# Shared memory zone size for cache metadata (keys + metadata).
+# 10m holds ~80,000 keys — enough for tens of thousands of hosts.
+nginx_cache_keys_zone: "seedcache:10m"
+
+# Entries not accessed in this window are evicted.
+nginx_cache_inactive: "24h"
+
+# Total disk quota for the cache.
+nginx_cache_max_size: "1g"
+
+# How long to serve cached 200 responses. Matches the renderer's
+# Cache-Control: max-age=300 so they don't disagree.
+nginx_cache_valid_seconds: 300
+
+# --------------------------------------------------------------------------
+# HTTP server.
+# --------------------------------------------------------------------------
+nginx_cache_listen_port: 80
+nginx_cache_server_name: "_"     # catch-all; override per host
+
+# --------------------------------------------------------------------------
+# Manual cache purge.
+# A PURGE method on this location lets an operator or CI pipeline
+# invalidate a single host's entry without restarting nginx.
+# --------------------------------------------------------------------------
+nginx_cache_purge_path: "/_purge"
+
+# --------------------------------------------------------------------------
+# Logging.
+# --------------------------------------------------------------------------
+nginx_cache_access_log: "/var/log/nginx/host-config-access.log"
+nginx_cache_error_log: "/var/log/nginx/host-config-error.log"
+nginx_cache_log_level: "warn"

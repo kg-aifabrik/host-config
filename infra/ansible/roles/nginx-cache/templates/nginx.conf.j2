@@ -1,0 +1,94 @@
+# Managed by Ansible (host-config nginx-cache role). Do not edit by hand.
+#
+# Purpose: caching reverse-proxy in front of the host-config renderer.
+#
+# Traffic flow:
+#   cloud-init (GET /v1/render/<asset_tag>/<file>)
+#     → nginx (this config, port {{ nginx_cache_listen_port }})
+#       → cache hit: serve from disk, no upstream RTT
+#       → cache miss: proxy to renderer at {{ nginx_cache_renderer_upstream }}
+#
+# Cache parameters mirror the renderer's Cache-Control: max-age=300 so both
+# layers agree on freshness and a revalidation round-trip is never needed for
+# a warm cache entry.
+#
+# PURGE: an operator or CI pipeline can evict a single host's entry with:
+#   curl -X PURGE http://<this-host>/_purge/v1/render/<asset_tag>/meta-data
+# No auth guard is intentional for the lab environment; add ngx_http_auth_request
+# or IP allowlists before production promotion.
+
+proxy_cache_path {{ nginx_cache_path }}
+    levels=1:2
+    keys_zone={{ nginx_cache_keys_zone }}
+    inactive={{ nginx_cache_inactive }}
+    max_size={{ nginx_cache_max_size }}
+    use_temp_path=off;
+
+server {
+    listen {{ nginx_cache_listen_port }};
+    server_name {{ nginx_cache_server_name }};
+
+    access_log {{ nginx_cache_access_log }};
+    error_log  {{ nginx_cache_error_log }} {{ nginx_cache_log_level }};
+
+    # -----------------------------------------------------------------------
+    # Render cache location.
+    # Proxies to the renderer and caches successful (200) responses on disk.
+    # -----------------------------------------------------------------------
+    location /v1/ {
+        proxy_pass {{ nginx_cache_renderer_upstream }};
+
+        proxy_cache              seedcache;
+        proxy_cache_valid        200 {{ nginx_cache_valid_seconds }}s;
+        proxy_cache_use_stale    error timeout updating http_500 http_502 http_503 http_504;
+        proxy_cache_lock         on;
+        proxy_cache_lock_timeout 5s;
+
+        # Surface cache status in the response for debugging.
+        add_header X-Cache-Status $upstream_cache_status always;
+
+        # Pass the renderer's ETag / Last-Modified through so cloud-init
+        # (or an operator) can do conditional GETs.
+        proxy_pass_header ETag;
+        proxy_pass_header Last-Modified;
+
+        proxy_set_header Host              $host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # -----------------------------------------------------------------------
+    # Manual purge location.
+    # Accepts PURGE <path> and invalidates the cached entry for that key.
+    # Usage: PURGE {{ nginx_cache_purge_path }}/<original-path>
+    # -----------------------------------------------------------------------
+    location {{ nginx_cache_purge_path }}/ {
+        # Only accept the PURGE method; everything else is a 405.
+        limit_except PURGE {
+            deny all;
+        }
+
+        # Strip the purge prefix to reconstruct the original cache key.
+        # e.g. PURGE /_purge/v1/render/SN-CPU-001/meta-data
+        #   → proxies to renderer at /v1/render/SN-CPU-001/meta-data
+        #   → nginx evicts that cache key.
+        proxy_pass {{ nginx_cache_renderer_upstream }};
+        proxy_cache_purge seedcache $scheme$host$request_uri;
+    }
+
+    # -----------------------------------------------------------------------
+    # Operational pass-through.
+    # /healthz and /readyz are not cached — operational endpoints must
+    # always reflect live state so an orchestrator gets accurate signal.
+    # -----------------------------------------------------------------------
+    location ~ ^/(healthz|readyz|metrics)$ {
+        proxy_pass {{ nginx_cache_renderer_upstream }};
+        proxy_cache off;
+
+        proxy_set_header Host              $host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
