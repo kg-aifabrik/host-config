@@ -1,8 +1,14 @@
 """Smoke tests — the bare minimum that proves the package is importable.
 
-Real functional tests land alongside the code they cover starting in M1+.
-This file exists to satisfy `pytest` (exit code 5 on empty collection)
-and to give CI something to verify from day one.
+Unit-level. Real functional tests live alongside the code they cover
+in `tests/unit/<package>/test_<module>.py`. This file exists to satisfy
+`pytest` (which exits with code 5 if it can't collect any tests) and
+to give CI something to assert from the very first commit.
+
+Why kept: in addition to fixing the empty-collection issue, this test
+catches the "the package metadata is broken" failure mode (e.g., a bad
+import in `__init__.py`) that would otherwise surface as a confusing
+collection error in every other test file.
 """
 
 from __future__ import annotations

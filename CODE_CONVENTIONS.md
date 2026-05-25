@@ -222,6 +222,60 @@ For functions with non-trivial invariants — model validators, renderers, anyth
 - **Coverage is a floor, not a ceiling.** Mutation testing (deferred until M7.5; see plan §6.4) will complement coverage once added.
 - **Reviewers may require tests for code that lacks them**, regardless of coverage number, if the code is non-trivial.
 
+### Test documentation
+
+**Test code is documented to the same standard as production code.** Tests are the executable specification; an unreadable test is a worse defect than missing documentation on a private helper. The rules below are non-negotiable for every new test file and apply retroactively when an existing file is touched.
+
+**Module-level docstring (every test file).** Two paragraphs minimum:
+
+1. *What* this file tests — name the production module + the concern (e.g., "validators in `host_config.models.intent.HostIntent`," "the CLI parser in `fixtures.netbox.populate`").
+2. *Test category* — unit / component / integration / e2e — and any environmental assumptions (e.g., "requires a live Netbox; skipped via the `requires_netbox` marker if unreachable"). Cross-reference the related ADR or implementation-plan section if relevant.
+
+**Test-class docstring (every `TestX` class).** One or two sentences describing the surface the class covers ("Construction and validation of `Bond`"). When the class exists to scope a non-obvious slice (e.g., parametrized property-based tests, conflict-detection scenarios), explain *why* it's grouped that way.
+
+**Test-method docstring (every test function).** At minimum a single declarative sentence describing the behavior verified ("A bond with two members and default 802.3ad config constructs cleanly"). For non-trivial tests, expand:
+
+- **`Approach:`** paragraph — describe *how* the test exercises the behavior, especially when the test setup is non-obvious (mock construction, parametrized cases, specific magic values). Same convention as production docstrings.
+- **`Why:`** paragraph — when the test exists to guard against a *specific* failure mode (a past bug, a subtle invariant, a regression risk), call it out. A reader two years from now should not have to git-archaeology to understand why this test exists.
+
+**Inline comments in test bodies.** Use the same prefix tags as production code (`# WHY:`, `# NOTE:`, `# SAFETY:`). Common cases:
+
+- Why a specific magic number was chosen (e.g., "9000 = jumbo MTU per `MAX_MTU`").
+- What a mock's behavior is simulating ("returns 500 to simulate Netbox transient failure").
+- Why the order of operations in setup matters.
+- The expected error path being exercised, when it's not obvious from the assertion.
+
+**Example — minimum documentation for a non-trivial test:**
+
+```python
+class TestBond:
+    """Construction and validation of `Bond`. Cross-NIC checks (e.g., bond
+    members reference existing NICs) live in `test_intent.py` because they
+    require a `HostIntent` to exist."""
+
+    @pytest.mark.fast
+    def test_duplicate_members_rejected(self) -> None:
+        """A bond cannot enslave the same NIC twice.
+
+        Why:
+            Catches a foot-gun where a hand-written fixture lists the
+            same NIC name twice in `members`. The bond's `__init__`
+            validates uniqueness before delegating to Pydantic, so the
+            error message is colocated with the construction site
+            (clearer in stack traces than a downstream Pydantic error).
+
+        Approach:
+            Construct a Bond with `members=["nsa", "nsa"]`; assert a
+            ValueError with "unique" in the message is raised.
+        """
+        with pytest.raises(ValueError, match="unique"):
+            Bond(name="bond0", members=["nsa", "nsa"], mtu=9000)
+```
+
+**What test docstrings don't need:** `Args:` / `Returns:` / `Raises:` sections (tests don't have public callers); `Scenarios:` block (the test name + docstring *is* the scenario being verified, not a list of further scenarios). The production-code `Scenarios:` block enumerates the tests; the tests themselves are the leaves.
+
+**Test names complement docstrings.** `test_<scenario>_<expected>` form already says a lot — `test_duplicate_members_rejected`, `test_mtu_outside_bounds_raises`. The docstring elaborates rather than restates. If the test name fully describes the test (e.g., `test_package_imports`), a one-line docstring is sufficient.
+
 ### What we deliberately don't test
 
 - **Trivial getters/setters.**

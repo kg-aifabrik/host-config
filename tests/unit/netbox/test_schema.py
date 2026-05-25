@@ -1,8 +1,24 @@
 """Tests for `host_config.netbox.schema`.
 
-Unit-level: validates the declarative schema and the payload rendering
-without needing a live Netbox. Component-level tests that exercise
-`apply_schema` against a real Netbox container land in M1-4.
+Unit-level. Validates the declarative schema and the payload rendering
+without needing a live Netbox — the pynetbox client is mocked.
+Component-level tests that exercise `apply_schema` against a real
+Netbox container live in `tests/component/netbox/test_schema.py`
+(landed in M1-4).
+
+Structure:
+
+- `TestFieldType` — enum surface; values must match Netbox's wire
+  format exactly.
+- `TestCustomFieldSpec` — per-shape construction and payload rendering.
+- `TestDefaultFieldsCatalog` — `DEFAULT_FIELDS` consistency
+  (no duplicates, expected names present, every entry renders cleanly).
+- `TestSchemaApplyReport` — semantics of the report object.
+- `TestApplySchema` — the apply function against a mocked client,
+  exercising the five behaviors: empty Netbox, idempotent, recoverable
+  drift, unrecoverable drift, transport failure.
+- `TestValuesEqual` — direct tests of the `_values_equal` normalization
+  helper that handles Netbox 4.x quirks.
 """
 
 from __future__ import annotations
@@ -25,6 +41,13 @@ from host_config.netbox.schema import (
 
 
 class TestFieldType:
+    """`FieldType` enum values must match Netbox's wire format exactly.
+
+    Why pinned: changing a value silently here would break schema
+    apply against existing Netbox installations. The wire format is
+    a public contract with Netbox itself.
+    """
+
     @pytest.mark.fast
     def test_values_match_netbox_wire_format(self) -> None:
         """Enum values mirror Netbox's accepted strings exactly."""
@@ -37,6 +60,14 @@ class TestFieldType:
 
 
 class TestCustomFieldSpec:
+    """Construction and payload rendering for `CustomFieldSpec`.
+
+    The `to_payload()` method is what actually hits Netbox; these tests
+    pin its behavior across the per-type shape variations (TEXT, SELECT
+    with choices, INTEGER with bounds, etc.) and the optional-field
+    omission rules.
+    """
+
     @pytest.mark.fast
     def test_minimal_text_field_payload(self) -> None:
         """A minimal TEXT field renders only the required keys."""
@@ -117,6 +148,13 @@ class TestCustomFieldSpec:
 
 
 class TestDefaultFieldsCatalog:
+    """`DEFAULT_FIELDS` consistency checks.
+
+    Why a separate class: the catalog itself is a contract — downstream
+    code (the renderer's loader, the fixtures) hard-codes some of these
+    field names. Removing or renaming silently here would break them.
+    """
+
     @pytest.mark.fast
     def test_expected_field_names_present(self) -> None:
         """The catalog contains every field name we depend on downstream."""
@@ -163,6 +201,13 @@ class TestDefaultFieldsCatalog:
 
 
 class TestSchemaApplyReport:
+    """Semantics of the report object returned by `apply_schema`.
+
+    The `is_no_op` property is the load-bearing signal callers use to
+    detect "nothing changed; idempotent re-run." These tests pin it
+    across the corner cases.
+    """
+
     @pytest.mark.fast
     def test_empty_report_is_no_op(self) -> None:
         """A fresh report (no work done) is a no-op."""
@@ -192,7 +237,22 @@ class TestSchemaApplyReport:
 
 
 class TestApplySchema:
-    """Mocked-Netbox tests for the apply_schema function."""
+    """Mocked-Netbox tests for `apply_schema`.
+
+    Approach:
+        Build a `MagicMock` standing in for `pynetbox.api`. The
+        `_mock_client` helper supports two modes:
+
+        1. `results_by_name={...}` — name-keyed, stable across repeated
+           calls. Used when `apply_schema` may call `cf.get(name=...)`
+           more than once for the same field (patch path).
+        2. `get_results=[...]` — sequence-keyed, consumed in spec order.
+           Simpler; sufficient for create-all / idempotent-all cases.
+
+        Each test exercises one of the five documented behaviors of
+        `apply_schema` (empty, idempotent, recoverable drift,
+        unrecoverable drift, transport failure).
+    """
 
     def _mock_client(
         self,
@@ -322,10 +382,16 @@ class TestApplySchema:
 
 
 class TestValuesEqual:
-    """Tests for the private _values_equal normalization helper.
+    """Direct tests for the private `_values_equal` normalization helper.
 
-    Exercised indirectly through apply_schema's idempotency tests, but
-    a couple of direct cases pin the Netbox-quirk handling.
+    `_values_equal` is exercised indirectly through `apply_schema`'s
+    idempotency tests, but a couple of direct cases pin the
+    Netbox-version-specific quirk handling.
+
+    Why direct: when Netbox 4.x changes its API representation again
+    (it's done so twice in 18 months), the regression surfaces here
+    *first* with a clear failure, rather than as a confusing
+    "every field is being patched on every apply" bug downstream.
     """
 
     @pytest.mark.fast

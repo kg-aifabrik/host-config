@@ -1,7 +1,26 @@
-"""Tests for `host_config.models.intent` and all cross-field invariants.
+"""Tests for `host_config.models.intent` and the cross-field invariants in
+`host_config.models.validators`.
 
-This is the load-bearing test file. Every invariant in `validators.py`
-should fire here against a deliberately broken intent.
+Unit-level. This is the load-bearing test file for the renderer's domain
+model: every cross-field invariant declared in `validators.py` is
+exercised here against a deliberately broken `HostIntent`, plus the
+happy-path constructions for both supported roles.
+
+Structure:
+
+- Fixture factories (`make_cpu_intent` / `make_b300_intent`) return
+  fully-valid intents the per-invariant tests then mutate. Mutation
+  happens via `_rebuild`, which round-trips through `model_dump()` so
+  the model_validator runs on the mutated dict — letting us construct
+  intentionally-broken intents that we couldn't construct via the
+  Pydantic API directly (validators run on creation).
+- `TestHappyPaths` — sanity checks the fixture factories produce
+  valid intents.
+- `TestCrossFieldInvariants` — one test per `InvariantError` code in
+  `validators.py`. Each deliberately violates exactly one rule.
+- `TestPydanticBoundary` — sanity checks that Pydantic-level
+  rejections (extra fields, unknown enum values) fire before the
+  cross-field validators run.
 """
 
 from __future__ import annotations
@@ -24,7 +43,13 @@ from host_config.models.vlan import VlanChild, VlanRole
 
 
 def make_cpu_intent() -> HostIntent:
-    """A minimal valid `cpu`-role intent."""
+    """A minimal valid `cpu`-role `HostIntent`.
+
+    Returns a fresh instance per call so tests can mutate without
+    cross-contaminating. Shape: 2 N-S NICs (aa:bb:cc:00:00:01..02),
+    one LACP bond on top, three VLAN children with the canonical role
+    assignment (mgmt/storage/ingress) and one default gateway on mgmt.
+    """
     return HostIntent(
         asset_tag="SN-CPU-001",
         hostname="k8s-cp-01",
@@ -65,7 +90,13 @@ def make_cpu_intent() -> HostIntent:
 
 
 def make_b300_intent() -> HostIntent:
-    """A minimal valid `gpu-b300`-role intent with all 10 NICs."""
+    """A minimal valid `gpu-b300`-role `HostIntent` with all 10 NICs.
+
+    Builds on `make_cpu_intent()` for the N-S subsystem (bond + VLAN
+    children) and adds 8 RoCE underlays (gpu0..gpu7) with MACs
+    aa:bb:cc:00:00:10..17 and per-NIC underlay IPs in
+    10.42.100..107.23/24.
+    """
     cpu = make_cpu_intent()
     roce = [
         RoceUnderlay(
@@ -94,9 +125,16 @@ def make_b300_intent() -> HostIntent:
 
 
 class TestHappyPaths:
+    """Sanity checks that the two fixture factories produce valid intents.
+
+    If these fail, every other test in this file is suspect — the
+    fixtures are wrong and the per-invariant tests are mutating broken
+    baselines. These are deliberately first.
+    """
+
     @pytest.mark.fast
     def test_cpu_intent_constructs(self) -> None:
-        """A clean cpu-role intent constructs without error."""
+        """A clean cpu-role intent constructs and has the expected shape."""
         intent = make_cpu_intent()
         assert intent.role is Role.CPU
         assert len(intent.ns_nics) == 2
@@ -105,7 +143,7 @@ class TestHappyPaths:
 
     @pytest.mark.fast
     def test_b300_intent_constructs(self) -> None:
-        """A clean gpu-b300-role intent with all 10 NICs constructs without error."""
+        """A clean gpu-b300-role intent with all 10 NICs constructs and has the expected shape."""
         intent = make_b300_intent()
         assert intent.role is Role.GPU_B300
         assert len(intent.roce_underlays) == 8
@@ -117,12 +155,22 @@ class TestHappyPaths:
 
 
 def _rebuild(intent: HostIntent, **overrides: Any) -> HostIntent:
-    """Rebuild an intent with field overrides; bypasses Pydantic's
-    assignment validation so we can construct intentionally-broken
-    intents to test the model_validator.
+    """Round-trip an intent with field overrides through `model_validate`.
 
-    Approach: dump → mutate → re-construct. The re-construction runs
-    full Pydantic + model_validator, which is what we're testing.
+    Approach:
+        1. `intent.model_dump()` → plain dict (preserves nested
+           structures as dicts; IPv4Interface values stay as objects).
+        2. Apply each keyword override at the top level.
+        3. `HostIntent.model_validate(data)` → runs full Pydantic field
+           validation AND the `model_validator(mode='after')` chain.
+
+    Why:
+        Pydantic's `validate_assignment=True` would let us mutate
+        attributes in place and re-validate, but cross-field validators
+        run *only* against the in-flight instance — broken combinations
+        get rejected at construction. To test "VLAN role mismatch
+        raises", we have to construct a broken intent from a dict, not
+        via the Python API.
     """
     # Round-trip via model_dump to get a plain dict, mutate, re-construct.
     data = intent.model_dump()
@@ -132,6 +180,17 @@ def _rebuild(intent: HostIntent, **overrides: Any) -> HostIntent:
 
 
 class TestCrossFieldInvariants:
+    """One test per `InvariantError` code from `validators.py`.
+
+    Each test deliberately violates exactly one rule and asserts:
+        - The specific `InvariantError` was raised.
+        - `exc.value.invariant` matches the documented invariant ID.
+
+    Tests intentionally do NOT assert against the `detail` message
+    contents — that's wording the developer of the validator should be
+    free to tune. The invariant ID is the stable contract.
+    """
+
     @pytest.mark.fast
     def test_one_ns_nic_raises_ns_nic_count(self) -> None:
         """1 N-S NIC → InvariantError ns-nic-count."""
@@ -335,9 +394,20 @@ class TestCrossFieldInvariants:
 
 
 class TestPydanticBoundary:
+    """Pydantic-level rejections happen *before* our cross-field validators.
+
+    Why:
+        These tests confirm the layering: extra top-level fields and
+        unknown enum values are caught by Pydantic's field validators,
+        not by the `model_validator(mode='after')` invariant chain.
+        A future change that re-orders the validation chain (or moves
+        rejection from Pydantic-level to invariant-level) would change
+        the exception type — these tests fail loudly when that happens.
+    """
+
     @pytest.mark.fast
     def test_extra_top_level_field_rejected(self) -> None:
-        """Unknown HostIntent fields are rejected."""
+        """Unknown `HostIntent` keyword is rejected with Pydantic `ValidationError`."""
         intent = make_cpu_intent()
         data = intent.model_dump()
         data["unexpected_field"] = "nope"
@@ -346,7 +416,7 @@ class TestPydanticBoundary:
 
     @pytest.mark.fast
     def test_invalid_role_rejected(self) -> None:
-        """An unknown role string is rejected by Pydantic before invariants run."""
+        """An unknown `role` is rejected by Pydantic enum coercion (not by our invariants)."""
         intent = make_cpu_intent()
         data = intent.model_dump()
         data["role"] = "embedded"

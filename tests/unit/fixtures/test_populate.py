@@ -1,8 +1,20 @@
-"""Unit tests for `fixtures.netbox.populate`.
+"""Tests for `fixtures.netbox.populate`.
 
-Mocked-Netbox tests: validate load_fixture parsing, populate idempotency
-under controlled inputs, and conflict detection. Component tests against
-a real Netbox container land in M1-4.
+Unit-level. Mocked Netbox client throughout. Validates:
+
+- The YAML loader (`load_fixture`) accepts the two committed fixture
+  files, rejects malformed YAML, and surfaces clear error context.
+- `PopulateReport` semantics (counts, no-op detection, summary format).
+- `populate()` against a fully-mocked client — empty Netbox creates
+  everything; conflicting pre-existing state raises
+  `FixtureConflictError`.
+- The CLI argparser surface (defaults, accepted args).
+- The `_slugify` helper.
+
+Component tests that exercise the populator against a real Netbox
+container live in `tests/component/` (the integration test in
+`tests/integration/test_netbox_fixtures.py` exercises the full
+schema + populate + query round-trip; landed in M1.5-1).
 """
 
 from __future__ import annotations
@@ -30,6 +42,13 @@ from fixtures.netbox.populate import (
 
 
 class TestLoadFixture:
+    """YAML loader behavior.
+
+    Tests the real committed fixtures (so changes to the YAML shape
+    that break loading surface here first) plus deliberately
+    malformed inputs to verify error reporting.
+    """
+
     @pytest.mark.fast
     def test_real_cpu_host_fixture_loads(self) -> None:
         """The committed cpu-host.yaml loads into a valid HostFixture."""
@@ -135,6 +154,12 @@ class TestLoadFixture:
 
 
 class TestPopulateReport:
+    """Semantics of the report object returned by `populate`.
+
+    The `is_no_op` property is the signal that the second-apply path
+    worked; idempotency is the core promise of the populator.
+    """
+
     @pytest.mark.fast
     def test_empty_is_no_op(self) -> None:
         assert PopulateReport().is_no_op is True
@@ -243,6 +268,15 @@ def _build_empty_netbox_client() -> MagicMock:
 
 
 class TestPopulate:
+    """`populate()` behavior with a fully-mocked pynetbox client.
+
+    These tests cannot catch every behavior — the real test of
+    correctness against Netbox 4.x's actual API quirks is the
+    integration gate in `tests/integration/test_netbox_fixtures.py`.
+    Unit-level we verify the orchestration: dependencies are resolved
+    in the right order, conflicting state raises the right error type.
+    """
+
     @pytest.mark.fast
     def test_empty_netbox_creates_everything(self) -> None:
         """Against an empty Netbox, every required object is created."""
@@ -303,6 +337,14 @@ class TestPopulate:
 
 
 class TestCLI:
+    """Argparse surface for the populator CLI.
+
+    These tests fence the public CLI contract: a script or runbook
+    calling `python -m fixtures.netbox.populate --url ... --token ...`
+    relies on these flag names. Breaking changes here require updating
+    callers (runbooks, just targets, future Ansible roles).
+    """
+
     @pytest.mark.fast
     def test_parser_defaults(self) -> None:
         """Defaults: localhost URL, data-dir next to the populate module, INFO logging."""
@@ -326,6 +368,15 @@ class TestCLI:
 
 
 class TestSlugify:
+    """`_slugify` — lowercases, strips whitespace, replaces spaces/underscores with hyphens.
+
+    Used to derive Netbox slugs (URL identifiers) from human-readable
+    names (manufacturer names, device-type models). Pinning the
+    behavior here means a future contributor doesn't accidentally
+    change "Super Micro" → "supermicro" and break already-created
+    Netbox slugs.
+    """
+
     @pytest.mark.fast
     @pytest.mark.parametrize(
         ("name", "expected"),
@@ -338,4 +389,5 @@ class TestSlugify:
         ],
     )
     def test_slugify_lowercases_and_normalizes(self, name: str, expected: str) -> None:
+        """Each parametrized case exercises one normalization (case, whitespace, separators)."""
         assert _slugify(name) == expected

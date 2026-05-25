@@ -157,15 +157,24 @@ git log --oneline --decorate -20
    wanting to add caller-domain concepts to a model or schema, stop
    and write an ADR first.
 2. **Tests before commit.** Every commit landing code has tests that pass.
-3. **Issue closure ritual.** Tick boxes, closing comment, CHANGELOG entry.
+3. **Tests are documented to the same standard as production code.**
+   Every test file has a module docstring; every `TestX` class has a
+   class docstring; every test method has at minimum a declarative
+   one-line docstring (non-trivial tests get `Approach:` + `Why:`
+   paragraphs). Inline comments use the same `# WHY:` / `# NOTE:` tags
+   as production code. The full rule is in
+   [CODE_CONVENTIONS.md §8 "Test documentation"](./CODE_CONVENTIONS.md#test-documentation)
+   with a worked example. When you touch an existing test file that
+   doesn't comply, bring it into compliance as part of the same commit.
+4. **Issue closure ritual.** Tick boxes, closing comment, CHANGELOG entry.
    See "When you close an issue" above.
-4. **Conventional commit messages.** Pre-commit rejects otherwise.
-5. **No commit signing.** Don't suddenly turn it on; if it should change,
+5. **Conventional commit messages.** Pre-commit rejects otherwise.
+6. **No commit signing.** Don't suddenly turn it on; if it should change,
    write an ADR.
-6. **Idempotent infrastructure.** Ansible roles re-apply as no-ops; fixture
+7. **Idempotent infrastructure.** Ansible roles re-apply as no-ops; fixture
    loaders re-apply as no-ops; schema applies re-apply as no-ops. Verified
    by the M1.5-1 integration test pattern.
-7. **Public APIs are versioned.** Renderer routes under `/v1/`; operational
+8. **Public APIs are versioned.** Renderer routes under `/v1/`; operational
    endpoints (`/healthz`, `/readyz`, `/metrics`) are forever-stable
    (no version prefix). See ADR-0003 for the versioning policy.
 
