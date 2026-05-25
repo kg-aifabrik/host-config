@@ -17,6 +17,7 @@ from host_config.netbox.errors import (
     NetboxQueryError,
     SchemaError,
 )
+from host_config.netbox.loader import load_host_intent
 from host_config.netbox.schema import (
     DEFAULT_FIELDS,
     CustomFieldSpec,
@@ -35,4 +36,5 @@ __all__ = [
     "SchemaApplyReport",
     "SchemaError",
     "apply_schema",
+    "load_host_intent",
 ]
