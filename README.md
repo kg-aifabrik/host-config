@@ -30,14 +30,23 @@ just hooks
 just lint
 just test
 
-# Bring up the lab on the current host (local dev)
-just lab-up         # provisions + configures (M6-1)
-just lab-test       # runs e2e suite (M6-3)
-just lab-down       # tears down (M6-3)
+# Bring up the lab (provision a DO Droplet + configure the full stack)
+just lab-up         # provision + deploy-lab (Netbox, renderer, nginx, OVS, QEMU)
+just lab-image      # sync tests/ (carries the e2e SSH key) + prepare the cloud image
+just lab-test       # run the e2e suite on the Droplet
+just lab-down       # tear down; verifies zero residual DO resources
 
-# Or compose: up → test → down with trap-on-exit cleanup
-just lab            # M6-3
+# Or compose the whole thing: up → image → test → down, with trap-on-exit cleanup
+just lab
+
+# Iterate on a live Droplet after editing a template / renderer / fixture:
+just lab-refresh    # rsync + restart renderer + flush nginx-cache + wait /healthz
 ```
+
+> **Cold-start ordering matters:** `lab-image` runs after `lab-up` and
+> before `lab-test` — it injects the e2e SSH key into the base image, and
+> that key (under `tests/`) isn't synced by `lab-up`. `just lab` sequences
+> these correctly. See [docs/runbooks/debug-cloud-init.md](docs/runbooks/debug-cloud-init.md).
 
 ## Configuration
 
