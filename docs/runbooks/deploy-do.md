@@ -50,13 +50,17 @@ Under the hood this runs:
 1. `ansible-playbook -i localhost, infra/ansible/playbooks/provision.yml`
 2. `ansible-playbook -i infra/ansible/inventory/lab infra/ansible/playbooks/deploy-lab.yml`
 
-Expect ~8–12 minutes for a clean provision (Docker install + Netbox first-boot is the slow step).
+Expect ~8–12 minutes for a clean provision (Docker install + Netbox
+first-boot migrations are the slow step — the `netbox-dev` role polls the
+container's HTTP endpoint then its Docker healthcheck, so a cold start
+that takes ~5 min of migrations is handled without manual intervention).
 
 **Verification after provisioning:**
 
 ```bash
 # Get the Droplet IP from the inventory file.
-DROPLET_IP=$(grep -oP '\d+\.\d+\.\d+\.\d+' infra/ansible/inventory/lab | head -1)
+# NOTE: grep -oE (POSIX), not -oP — BSD grep on macOS has no -P.
+DROPLET_IP=$(grep -oE '[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' infra/ansible/inventory/lab | head -1)
 
 # renderer health
 curl -s http://$DROPLET_IP/healthz
@@ -65,14 +69,35 @@ curl -s http://$DROPLET_IP/healthz
 curl -sv http://$DROPLET_IP/v1/render/SN-CPU-001/meta-data
 ```
 
+## Prepare the e2e cloud image
+
+```bash
+just lab-image
+```
+
+Syncs `tests/` to the Droplet (it carries the e2e SSH key at
+`tests/e2e/fixtures/test_vm_key.pub`, which `lab-up` does **not** sync)
+and then runs `prepare_image --prepare` to download the Ubuntu Noble
+image and inject that key. **This must run after `lab-up` and before
+`lab-test`** — skipping it bakes a keyless image and every e2e test fails
+to SSH into the VM. `just lab` sequences this automatically.
+
+The `image.install_failed_falling_back` warning here is expected on DO —
+see [debug-cloud-init.md](debug-cloud-init.md#apt-install-fails-inside-the-vm).
+
 ## Deployment (smoke test)
 
 ```bash
 just lab-test
 ```
 
-Runs `pytest -m e2e` on the Droplet over SSH. Tests marked `@requires_kvm`
-skip automatically if `/dev/kvm` is absent.
+Runs `pytest -m e2e` on the Droplet over SSH (guards that the prepared
+image exists first). Tests marked `@requires_kvm` skip automatically if
+`/dev/kvm` is absent.
+
+To iterate after editing a template / renderer / fixture on a live
+Droplet, use `just lab-refresh` (rsync + restart renderer + flush
+nginx-cache + wait `/healthz`) instead of a full re-provision.
 
 ## Canonical acceptance test (M6.5-1)
 
@@ -82,10 +107,12 @@ The full end-to-end acceptance test for the host-config project:
 just lab       # up → test → down; trap ensures teardown on any exit
 ```
 
-Expected outcome on `s-4vcpu-8gb-amd` with `/dev/kvm` present:
-- `test_cpu_host_boot.py` (M4.5-1): all 12 assertions pass — bond0 LACP,
+Expected outcome on `s-4vcpu-8gb-intel` with `/dev/kvm` present
+(23 passed, 4 skipped — the 4 DO-teardown tests skip without a token on
+the Droplet):
+- `test_cpu_host_boot.py` (M4.5-1): all 12 tests pass — bond0 LACP,
   VLAN IPs + MTUs, default route, nsa/nsb enslaved.
-- `test_b300_host_boot.py` (M5.5-1): all 12 assertions pass — bond0 UP,
+- `test_b300_host_boot.py` (M5.5-1): all 11 tests pass — bond0 UP,
   VLAN IPs, 8× gpu0..7 at MTU 9000, rdma_rxe loaded, 8 rxe devices,
   rping between rxe_gpu0 ↔ rxe_gpu1.
 
@@ -154,10 +181,10 @@ doctl compute droplet list --tag-name host-config-lab  # must be empty
 
 ## Estimated cost
 
-| Shape | $/hr | Typical run (up → test → down) | ≈ total |
+| Shape | $/hr | Typical run (up → image → test → down) | ≈ total |
 |---|---|---|---|
-| `s-4vcpu-8gb-amd` | $0.071 | 25–35 min | $0.04 |
-| `c-4` (CPU-optimized) | $0.119 | 25–35 min | $0.07 |
+| `s-4vcpu-8gb-intel` (default, Premium Intel + NVMe) | $0.077 | 18–25 min | $0.04 |
+| `c-4` (CPU-optimized, lon1/blr1 only) | $0.119 | 18–25 min | $0.07 |
 
 DO bills by the hour, minimum 1 hour per Droplet lifetime. If you
 provision and immediately destroy, you pay for 1 hour. Running the full
@@ -206,3 +233,15 @@ that passes locally points to a timing or resource issue:
    Droplet is slower than the Lima VM.
 3. Verify OVS bridge: `ssh root@$DROPLET_IP "ovs-vsctl show"`.
 4. Check the renderer log: `ssh root@$DROPLET_IP "journalctl -u host-config-renderer -n 50"`.
+
+For VM boot / network / RDMA failures specifically (bond0 missing,
+rdma_rxe not loaded, apt failing inside the guest, stale cached renders),
+see the dedicated runbook: **[debug-cloud-init.md](debug-cloud-init.md)**.
+It has the failure-classification table, the dump-to-`/dev/ttyS0`
+diagnostic trick, and the SR-IOV / IPv4 / route troubleshooting matrices.
+
+### E2E tests all fail to SSH into the VM on a fresh Droplet
+
+The image was prepared before the e2e SSH key was synced. Run
+`just lab-image` (it syncs `tests/` first, then preps). See the
+[cold-start ordering](debug-cloud-init.md#cold-start-order) section.

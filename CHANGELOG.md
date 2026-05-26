@@ -9,6 +9,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Lab e2e bring-up on DigitalOcean — full suite green (23/23).** Brought the
+  B300 RDMA e2e suite from 0/11 to 11/11 (and kept CPU at 12/12) on a real DO
+  Droplet, then proved the whole path is hands-off from a cold start. Captured
+  reference artifacts under `docs/artifacts/e2e-run-2026-05-26/` (rendered seed
+  bytes for both host shapes, both serial boot logs, pytest output, droplet
+  host info) so future regressions can be triaged by diffing against a
+  known-good baseline.
+- `docs/runbooks/debug-cloud-init.md`: diagnostic runbook for e2e VM
+  boot/network/RDMA failures — failure-classification table, the
+  dump-to-`/dev/ttyS0` trick for capturing inside-VM state after the fixture
+  tears the VM down, bond0/SR-IOV/apt troubleshooting matrices, the load-bearing
+  cold-start ordering, and the renderer + nginx-cache dev-iteration loop.
+- `just lab-image`: syncs `tests/` (which carries the e2e SSH key) to the
+  Droplet then runs `prepare_image --prepare`, in that order — closes the
+  chicken-and-egg where `prepare_image` needs a key that `lab-up` never synced.
+  `just lab` now sequences up → image → test → down.
+- `just lab-refresh`: dev-iteration recipe — rsync `src/` + `fixtures/`, restart
+  the renderer, flush the nginx-cache seeds, reload nginx, and poll `/healthz`.
+  Eliminates the "edit template, re-test, silently get stale cached bytes"
+  foot-gun.
+
 - Initial repository scaffolding: project metadata, code-quality tooling (`ruff`, `mypy --strict`, `pytest`/`pytest-cov`), pre-commit hooks, `justfile`, `.env.example`, `.editorconfig`. (M0-1, #1)
 - `CODE_CONVENTIONS.md`: authoritative rulebook for file organization, function conventions, docstring style (Google + Approach + Scenarios), inline comment tag taxonomy, naming, error handling, testing, and observability. (M0-2, #2)
 - `docs/` directory structure: `index.md` entry point, `architecture/` skeleton, `adr/` with Nygard-format template and README index, `runbooks/` skeleton, `diagrams/` README documenting the Excalidraw + SVG convention with shared color palette. (M0-3, #3)
@@ -71,3 +92,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - `CONTRIBUTING.md` now reflects the solo-dev direct-to-main workflow (no feature branches, no PRs, no commit signing). PR template kept for future use. (M0-2)
+- Default lab Droplet shape is now `s-4vcpu-8gb-intel` (Premium Intel + NVMe)
+  in `tor1`, was `s-4vcpu-8gb-amd` in `nyc3`. AMD slugs aren't exposed on most
+  DO accounts; the Intel NVMe tier roughly halves CPU e2e wall time vs. the
+  basic SATA tier. `provision.yml`, `deploy-do.md` updated.
+- `netbox-dev` role no longer does a single `docker compose up -d`. It starts
+  `netbox` alone, polls its HTTP endpoint, then polls the container's Docker
+  healthcheck, then brings up the worker — so a cold start with ~5 min of
+  first-run Django migrations no longer fails with "dependency netbox … is
+  unhealthy".
+- `gpu-b300` user-data runcmd now installs RDMA packages *before* `netplan
+  apply` (the lab netplan installs a default route via a non-existent gateway
+  that breaks egress), enables `universe`, forces IPv4 (QEMU SLIRP is
+  IPv4-only), uses `linux-modules-extra-$(uname -r)`, and waits for bond0 via a
+  polling loop. Both `cpu` and `gpu-b300` deliver Netplan via `write_files` +
+  `netplan apply` (cloud-init 25.x never fetches `network-config` from HTTP
+  NoCloud seeds). Goldens regenerated.
+- Lab Netbox B300 fixture sets `sriov_vfs: 0` for GPU NICs (QEMU virtio-net-pci
+  has no SR-IOV; `virtual-function-count: 16` blocked netplan from creating
+  bond0/VLANs/addresses). Production fixtures keep the real value (e.g. 16).
+
+### Fixed
+
+- `prepare_image.py` falls back to a network-free `virt-customize` when the
+  libguestfs appliance VM can't reach archive.ubuntu.com on DO Droplets using
+  the systemd-resolved stub (127.0.0.53). The SSH key still gets injected;
+  RDMA packages install in-guest at boot.
+- `justfile` `_lab_ip` used `grep -oP` (Perl regex) — BSD grep on macOS has no
+  `-P`, silently yielding an empty IP and breaking every Droplet-targeting
+  recipe (`lab-image`, `lab-test`, `lab-refresh`, `lab-logs`). Switched to
+  POSIX `grep -oE`. Same fix applied to the snippet in `deploy-do.md`.
+- `test_cloud_init_exit_zero` (both host shapes) accepts cloud-init exit 2
+  (`done` with recoverable errors) — LACP can't negotiate without a real switch
+  partner in the lab, which is expected, not a failure.
