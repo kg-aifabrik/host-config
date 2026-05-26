@@ -1,0 +1,28 @@
+============================= test session starts ==============================
+collecting ... collected 23 items
+
+tests/e2e/test_cpu_host_boot.py::TestCpuHostBoot::test_cloud_init_exit_zero PASSED [  4%]
+tests/e2e/test_cpu_host_boot.py::TestCpuHostBoot::test_bond0_exists_and_is_up PASSED [  8%]
+tests/e2e/test_cpu_host_boot.py::TestCpuHostBoot::test_bond0_has_two_members PASSED [ 13%]
+tests/e2e/test_cpu_host_boot.py::TestCpuHostBoot::test_bond0_lacp_mode PASSED [ 17%]
+tests/e2e/test_cpu_host_boot.py::TestCpuHostBoot::test_vlan100_up_with_correct_ip PASSED [ 21%]
+tests/e2e/test_cpu_host_boot.py::TestCpuHostBoot::test_vlan100_mtu_is_1500 PASSED [ 26%]
+tests/e2e/test_cpu_host_boot.py::TestCpuHostBoot::test_vlan200_up_with_correct_ip PASSED [ 30%]
+tests/e2e/test_cpu_host_boot.py::TestCpuHostBoot::test_vlan200_mtu_is_9000 PASSED [ 34%]
+tests/e2e/test_cpu_host_boot.py::TestCpuHostBoot::test_vlan300_up_with_correct_ip PASSED [ 39%]
+tests/e2e/test_cpu_host_boot.py::TestCpuHostBoot::test_default_route_via_vlan100_gateway PASSED [ 43%]
+tests/e2e/test_cpu_host_boot.py::TestCpuHostBoot::test_nsa_in_bond0 PASSED [ 47%]
+tests/e2e/test_cpu_host_boot.py::TestCpuHostBoot::test_nsb_in_bond0 PASSED [ 52%]
+tests/e2e/test_b300_host_boot.py::TestB300HostBoot::test_cloud_init_exit_zero PASSED [ 56%]
+tests/e2e/test_b300_host_boot.py::TestB300HostBoot::test_bond0_up PASSED [ 60%]
+tests/e2e/test_b300_host_boot.py::TestB300HostBoot::test_vlan100_correct_ip PASSED [ 65%]
+tests/e2e/test_b300_host_boot.py::TestB300HostBoot::test_vlan200_correct_ip PASSED [ 69%]
+tests/e2e/test_b300_host_boot.py::TestB300HostBoot::test_vlan300_correct_ip PASSED [ 73%]
+tests/e2e/test_b300_host_boot.py::TestB300HostBoot::test_all_roce_nics_up PASSED [ 78%]
+tests/e2e/test_b300_host_boot.py::TestB300HostBoot::test_roce_nic_mtu_9000 PASSED [ 82%]
+tests/e2e/test_b300_host_boot.py::TestB300HostBoot::test_roce_nics_have_correct_ips PASSED [ 86%]
+tests/e2e/test_b300_host_boot.py::TestB300HostBoot::test_rdma_rxe_module_loaded PASSED [ 91%]
+tests/e2e/test_b300_host_boot.py::TestB300HostBoot::test_eight_rxe_devices_present PASSED [ 95%]
+tests/e2e/test_b300_host_boot.py::TestB300HostBoot::test_rdma_verbs_rping PASSED [100%]
+
+======================== 23 passed in 136.50s (0:02:16) ========================

@@ -1,0 +1,28 @@
+Linux host-config-lab 6.8.0-71-generic #71-Ubuntu SMP PREEMPT_DYNAMIC Tue Jul 22 16:52:38 UTC 2025 x86_64 x86_64 x86_64 GNU/Linux
+---
+PRETTY_NAME="Ubuntu 24.04.3 LTS"
+NAME="Ubuntu"
+VERSION_ID="24.04"
+VERSION="24.04.3 LTS (Noble Numbat)"
+VERSION_CODENAME=noble
+ID=ubuntu
+ID_LIKE=debian
+HOME_URL="https://www.ubuntu.com/"
+SUPPORT_URL="https://help.ubuntu.com/"
+BUG_REPORT_URL="https://bugs.launchpad.net/ubuntu/"
+PRIVACY_POLICY_URL="https://www.ubuntu.com/legal/terms-and-policies/privacy-policy"
+UBUNTU_CODENAME=noble
+LOGO=ubuntu-logo
+---
+NAME    MAJ:MIN RM  SIZE RO TYPE MOUNTPOINTS
+vda     253:0    0  160G  0 disk 
+├─vda1  253:1    0  159G  0 part /
+├─vda14 253:14   0    4M  0 part 
+├─vda15 253:15   0  106M  0 part /boot/efi
+└─vda16 259:0    0  913M  0 part /boot
+vdb     253:16   0  488K  1 disk 
+---
+4
+               total        used        free      shared  buff/cache   available
+Mem:           7.8Gi       2.3Gi       2.5Gi        44Mi       3.4Gi       5.5Gi
+Swap:             0B          0B          0B
