@@ -71,8 +71,8 @@ future contributor to locate them.
     receive a wrong network config, causing it to join the wrong VLAN or
     lose connectivity.
   - Cached entries in nginx (up to 24 h inactive) can perpetuate a poisoned
-    seed. Mitigation: the PURGE endpoint at `/_purge/` can evict individual
-    entries immediately.
+    seed. Mitigation: an `X-Purge` request header on the render URL forces an
+    individual entry to refresh immediately (`proxy_cache_bypass`).
 - **Triggers for re-evaluation:**
   - Any host outside the physically isolated mgmt VLAN is able to reach the
     seed server.

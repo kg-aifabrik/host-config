@@ -39,11 +39,11 @@ nginx_cache_listen_port: 80
 nginx_cache_server_name: "_"     # catch-all; override per host
 
 # --------------------------------------------------------------------------
-# Manual cache purge.
-# A PURGE method on this location lets an operator or CI pipeline
-# invalidate a single host's entry without restarting nginx.
+# Manual cache refresh.
+# Invalidation uses an `X-Purge` request header on the normal render URL
+# (proxy_cache_bypass) — stock nginx, no third-party module, no dedicated
+# location/var. See the nginx.conf.j2 header comment.
 # --------------------------------------------------------------------------
-nginx_cache_purge_path: "/_purge"
 
 # --------------------------------------------------------------------------
 # Logging.

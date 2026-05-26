@@ -14,8 +14,8 @@ Ansible role that deploys an nginx caching reverse-proxy in front of the
 - Caches HTTP 200 responses for `nginx_cache_valid_seconds` (default 300 s),
   matching the renderer's `Cache-Control: max-age=300`.
 - Adds `X-Cache-Status` to responses so operators can confirm HIT/MISS/BYPASS.
-- Exposes a PURGE location at `nginx_cache_purge_path` for point-in-time
-  cache invalidation without an nginx reload.
+- Supports point-in-time refresh of a single entry via an `X-Purge` request
+  header (`proxy_cache_bypass`) — stock nginx, no reload, no third-party module.
 - Passes `/healthz`, `/readyz`, and `/metrics` through without caching.
 
 ## Role variables
@@ -30,7 +30,6 @@ Ansible role that deploys an nginx caching reverse-proxy in front of the
 | `nginx_cache_valid_seconds` | `300` | How long to serve cached 200 responses |
 | `nginx_cache_listen_port` | `80` | HTTP listen port |
 | `nginx_cache_server_name` | `_` | nginx `server_name` (catch-all by default) |
-| `nginx_cache_purge_path` | `/_purge` | Location prefix for PURGE requests |
 | `nginx_cache_access_log` | `/var/log/nginx/host-config-access.log` | Access log path |
 | `nginx_cache_error_log` | `/var/log/nginx/host-config-error.log` | Error log path |
 | `nginx_cache_log_level` | `warn` | nginx error log level |
@@ -53,15 +52,27 @@ Ansible role that deploys an nginx caching reverse-proxy in front of the
         nginx_cache_listen_port: 80
 ```
 
-## Cache purge
+## Cache refresh (manual invalidation)
 
-To invalidate a single host's entry:
+To force a single host's entry to refresh, send the normal render URL with
+an `X-Purge` header. nginx bypasses the cached copy, re-fetches from the
+renderer, and overwrites the stored entry (`X-Cache-Status: BYPASS`):
 
 ```bash
-curl -X PURGE http://<seed-server>/_purge/v1/render/<asset_tag>/meta-data
-curl -X PURGE http://<seed-server>/_purge/v1/render/<asset_tag>/user-data
-curl -X PURGE http://<seed-server>/_purge/v1/render/<asset_tag>/network-config
+curl -H 'X-Purge: 1' http://<seed-server>/v1/render/<asset_tag>/meta-data
+curl -H 'X-Purge: 1' http://<seed-server>/v1/render/<asset_tag>/user-data
+curl -H 'X-Purge: 1' http://<seed-server>/v1/render/<asset_tag>/network-config
 ```
+
+A subsequent request without the header is served the freshly stored entry
+(`X-Cache-Status: HIT`).
+
+**Why not a true `PURGE`/DELETE?** The canonical `proxy_cache_purge`
+directive needs the third-party `ngx_cache_purge` module, which is not
+packaged for Ubuntu 24.04. `proxy_cache_bypass` ships with stock nginx and
+meets the operational need (force one key fresh without a restart). Because
+the trigger is a header — not a query arg — the cache key is unchanged, so
+the bypass overwrites the same entry instead of creating a new one.
 
 ## Idempotency
 

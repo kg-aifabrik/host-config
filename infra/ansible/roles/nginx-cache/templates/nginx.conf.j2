@@ -12,10 +12,18 @@
 # layers agree on freshness and a revalidation round-trip is never needed for
 # a warm cache entry.
 #
-# PURGE: an operator or CI pipeline can evict a single host's entry with:
-#   curl -X PURGE http://<this-host>/_purge/v1/render/<asset_tag>/meta-data
-# No auth guard is intentional for the lab environment; add ngx_http_auth_request
-# or IP allowlists before production promotion.
+# REFRESH (invalidate one host's entry): send the normal render URL with an
+# `X-Purge` header. nginx then bypasses the cached copy, re-fetches from the
+# renderer, and overwrites the stored entry (X-Cache-Status: BYPASS):
+#   curl -H 'X-Purge: 1' http://<this-host>/v1/render/<asset_tag>/meta-data
+# WHY a header bypass rather than a true DELETE-purge: the canonical
+# proxy_cache_purge directive needs the third-party ngx_cache_purge module,
+# which is not packaged for Ubuntu 24.04. proxy_cache_bypass ships with stock
+# nginx and meets the operational need (force one key fresh without a
+# restart). Because the trigger is a header — not a query arg — the cache key
+# is unchanged, so the bypass overwrites the same entry instead of creating a
+# new one. No auth guard is intentional for the lab; add ngx_http_auth_request
+# or an IP allowlist before production promotion.
 
 proxy_cache_path {{ nginx_cache_path }}
     levels=1:2
@@ -44,7 +52,14 @@ server {
         proxy_cache_lock         on;
         proxy_cache_lock_timeout 5s;
 
-        # Surface cache status in the response for debugging.
+        # Manual refresh: a request carrying any non-empty `X-Purge` header
+        # bypasses the cached entry, forcing a fresh upstream fetch that is
+        # then re-stored (overwriting the stale copy). Header — not query
+        # arg — so the cache key is unchanged. See the file header.
+        proxy_cache_bypass       $http_x_purge;
+
+        # Surface cache status in the response for debugging
+        # (HIT | MISS | BYPASS | STALE | UPDATING).
         add_header X-Cache-Status $upstream_cache_status always;
 
         # Pass the renderer's ETag / Last-Modified through so cloud-init
@@ -56,17 +71,6 @@ server {
         proxy_set_header X-Real-IP         $remote_addr;
         proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
-    }
-
-    # -----------------------------------------------------------------------
-    # Manual purge location.
-    # NOTE: proxy_cache_purge requires the ngx_cache_purge third-party
-    # module (not in stock nginx). This endpoint returns 501 in the lab.
-    # Install nginx-extras or libnginx-mod-http-cache-purge to activate.
-    # TODO(M3-2): wire up when component cache tests are implemented.
-    # -----------------------------------------------------------------------
-    location {{ nginx_cache_purge_path }}/ {
-        return 501 "Cache purge not available in this build (needs ngx_cache_purge module)\n";
     }
 
     # -----------------------------------------------------------------------
@@ -132,6 +136,9 @@ server {
 #         proxy_cache_lock         on;
 #         proxy_cache_lock_timeout 5s;
 #
+#         # Manual refresh via X-Purge header (see active :80 block above).
+#         proxy_cache_bypass       $http_x_purge;
+#
 #         add_header X-Cache-Status $upstream_cache_status always;
 #         proxy_pass_header ETag;
 #         proxy_pass_header Last-Modified;
@@ -140,12 +147,6 @@ server {
 #         proxy_set_header X-Real-IP         $remote_addr;
 #         proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
 #         proxy_set_header X-Forwarded-Proto https;
-#     }
-#
-#     location {{ nginx_cache_purge_path }}/ {
-#         limit_except PURGE { deny all; }
-#         proxy_pass {{ nginx_cache_renderer_upstream }};
-#         proxy_cache_purge seedcache $scheme$host$request_uri;
 #     }
 #
 #     location ~ ^/(healthz|readyz|metrics)$ {
