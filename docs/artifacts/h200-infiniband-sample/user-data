@@ -1,0 +1,193 @@
+#cloud-config
+# Sample cloud-init user-data — NVIDIA HGX H200 host with an InfiniBand
+# (NDR) backend compute fabric. Hand-authored reference for test
+# provisioning; PLACEHOLDER MACs (aa:bb:cc:...) must be substituted.
+#
+# Topology:
+#   - North-South management: 2x Ethernet ports (nsa, nsb) → LACP bond0 →
+#     3 VLANs (mgmt / storage / ingress). Standard, match-by-MAC.
+#   - East-west compute: 8x InfiniBand NDR HCA ports (ib0..ib7) as IPoIB,
+#     one /24 per rail. NOT bonded; native RDMA (no Soft-RoCE / rdma_rxe —
+#     that is a B300 *lab* substitute; real InfiniBand HCAs do RDMA in
+#     hardware).
+#
+# WHY the netplan is delivered via write_files + `netplan apply` (not the
+# NoCloud network-config endpoint): cloud-init 25.x never fetches
+# network-config from HTTP NoCloud seeds. The embedded YAML below is
+# byte-identical to the sibling ./network-config file, so a local/ISO
+# NoCloud seed (which DOES read network-config) yields the same result.
+hostname: gpu-h200-01.pod07.site03.internal
+fqdn: gpu-h200-01.pod07.site03.internal
+manage_etc_hosts: true
+preserve_hostname: false
+
+write_files:
+  # Unlimited locked memory for RDMA verbs (ibv_reg_mr with large buffers).
+  - path: /etc/security/limits.d/rdma.conf
+    owner: root:root
+    permissions: "0644"
+    content: |
+      # InfiniBand / RDMA require unlimited locked memory.
+      * hard memlock unlimited
+      * soft memlock unlimited
+
+  # Load the InfiniBand + IPoIB stack at every boot. ib_ipoib creates the
+  # ibN interfaces the netplan below configures.
+  - path: /etc/modules-load.d/infiniband.conf
+    owner: root:root
+    permissions: "0644"
+    content: |
+      mlx5_ib
+      ib_umad
+      ib_uverbs
+      rdma_ucm
+      ib_ipoib
+
+  # Netplan network config. 0600 to satisfy netplan's strict-permissions
+  # check. Byte-identical (under the network: key) to ./network-config.
+  - path: /etc/netplan/60-lab.yaml
+    permissions: '0600'
+    owner: root:root
+    content: |
+      network:
+        version: 2
+        renderer: networkd
+        ethernets:
+          nsa:
+            match:
+              macaddress: aa:bb:cc:00:00:01
+            set-name: nsa
+            mtu: 9000
+          nsb:
+            match:
+              macaddress: aa:bb:cc:00:00:02
+            set-name: nsb
+            mtu: 9000
+          # 8x InfiniBand NDR HCA ports as IPoIB. MTU 2044 = datagram-mode
+          # default. Real ConnectX-7 ports have a 20-byte IPoIB hwaddr / port
+          # GUID, not a 6-byte MAC — for hardware, replace each `match:` with
+          # `match: {name: "ibp*s0"}` or a GUID-keyed udev/.link rule.
+          ib0:
+            match:
+              macaddress: aa:bb:cc:00:0e:00
+            set-name: ib0
+            mtu: 2044
+            addresses:
+              - 10.42.100.10/24
+          ib1:
+            match:
+              macaddress: aa:bb:cc:00:0e:01
+            set-name: ib1
+            mtu: 2044
+            addresses:
+              - 10.42.101.10/24
+          ib2:
+            match:
+              macaddress: aa:bb:cc:00:0e:02
+            set-name: ib2
+            mtu: 2044
+            addresses:
+              - 10.42.102.10/24
+          ib3:
+            match:
+              macaddress: aa:bb:cc:00:0e:03
+            set-name: ib3
+            mtu: 2044
+            addresses:
+              - 10.42.103.10/24
+          ib4:
+            match:
+              macaddress: aa:bb:cc:00:0e:04
+            set-name: ib4
+            mtu: 2044
+            addresses:
+              - 10.42.104.10/24
+          ib5:
+            match:
+              macaddress: aa:bb:cc:00:0e:05
+            set-name: ib5
+            mtu: 2044
+            addresses:
+              - 10.42.105.10/24
+          ib6:
+            match:
+              macaddress: aa:bb:cc:00:0e:06
+            set-name: ib6
+            mtu: 2044
+            addresses:
+              - 10.42.106.10/24
+          ib7:
+            match:
+              macaddress: aa:bb:cc:00:0e:07
+            set-name: ib7
+            mtu: 2044
+            addresses:
+              - 10.42.107.10/24
+        bonds:
+          bond0:
+            interfaces:
+              - nsa
+              - nsb
+            mtu: 9000
+            parameters:
+              mode: 802.3ad
+              lacp-rate: fast
+              transmit-hash-policy: layer3+4
+        vlans:
+          bond0.100:
+            id: 100
+            link: bond0
+            mtu: 1500
+            addresses:
+              - 10.42.10.10/24
+            routes:
+              - to: default
+                via: 10.42.10.1
+          bond0.200:
+            id: 200
+            link: bond0
+            mtu: 9000
+            addresses:
+              - 10.42.20.10/24
+          bond0.300:
+            id: 300
+            link: bond0
+            mtu: 1500
+            addresses:
+              - 10.42.30.10/24
+
+runcmd:
+  # Install the InfiniBand userland + extra kernel modules BEFORE applying
+  # netplan. WHY ordering: the lab netplan installs a default route via the
+  # bond0.100 gateway (10.42.10.1); once that replaces the provisioning
+  # network's default route, apt can no longer reach the archive. Doing apt
+  # first keeps the original default route. (Same lesson as the B300 role.)
+  #
+  # On real H200 nodes the Mellanox stack comes from DOCA-OFED / MLNX_OFED,
+  # which supersedes these inbox packages; this inbox path is for a generic
+  # Ubuntu test image. linux-modules-extra carries ib_ipoib / mlx5_ib for
+  # the stock kernel; rdma-core + ibverbs-utils + infiniband-diags provide
+  # ibstat / ibv_devinfo / ibping. universe is enabled for ibverbs-utils
+  # and infiniband-diags; ForceIPv4 because some provisioning NATs are v4-only.
+  - >-
+    sed -i 's/^Components: main.*$/Components: main universe/'
+    /etc/apt/sources.list.d/ubuntu.sources
+  - DEBIAN_FRONTEND=noninteractive apt-get -o Acquire::ForceIPv4=true update
+  - >-
+    DEBIAN_FRONTEND=noninteractive apt-get -o Acquire::ForceIPv4=true install -y
+    "linux-modules-extra-$(uname -r)" rdma-core ibverbs-utils ibverbs-providers
+    infiniband-diags
+  # Load the IB stack now (also pinned for future boots via
+  # /etc/modules-load.d/infiniband.conf). || true: a missing module on a
+  # non-IB test box is non-fatal — the host still boots and the IPoIB
+  # interfaces simply won't appear.
+  - modprobe mlx5_ib || true
+  - modprobe ib_umad || true
+  - modprobe ib_uverbs || true
+  - modprobe rdma_ucm || true
+  - modprobe ib_ipoib || true
+  # Apply the network config now that packages + modules are in place.
+  - netplan apply
+  # Best-effort wait for the first IPoIB rail to appear (cap 60s). Harmless
+  # on a box with no real IB HCA — the loop just times out.
+  - timeout 60 sh -c 'until ip link show ib0 >/dev/null 2>&1; do sleep 1; done' || true
