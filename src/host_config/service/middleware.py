@@ -39,6 +39,12 @@ import structlog
 from fastapi import Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware
 
+from host_config.observability.metrics import (
+    ACTIVE_REQUESTS,
+    REQUEST_DURATION,
+    REQUESTS_TOTAL,
+)
+
 REQUEST_ID_HEADER = "X-Request-Id"
 
 # The service start-time is used as `Last-Modified` for render responses.
@@ -54,6 +60,23 @@ _CACHE_ROUTE_PREFIX = "/v1/render/"
 _CACHE_MAX_AGE = 300  # seconds — matches nginx's proxy_cache_valid 200 5m
 
 logger = structlog.get_logger(__name__)
+
+
+def _route_template(request: Request) -> str:
+    """Return the matched route template for metric labelling.
+
+    WHY the template, not ``request.url.path``: the concrete path embeds
+    the asset tag (``/v1/render/SN-GPU-001/user-data``), which is
+    unbounded — labelling metrics with it would explode Prometheus
+    cardinality. Starlette populates ``request.scope["route"]`` once
+    routing has resolved (i.e. after ``call_next``); its ``.path`` is the
+    template (``/v1/render/{asset_tag}/{file_kind}``). Unmatched requests
+    (404s on unknown paths) have no route — bucket them as ``"<unmatched>"``
+    so a scanner hammering random URLs can't blow up cardinality either.
+    """
+    route = request.scope.get("route")
+    path = getattr(route, "path", None)
+    return path if isinstance(path, str) else "<unmatched>"
 
 
 def _coerce_request_id(raw: str | None) -> str:
@@ -131,9 +154,16 @@ class RequestContextMiddleware(BaseHTTPMiddleware):
             method=request.method,
             path=request.url.path,
         )
+        logger.info("request.received")
+        ACTIVE_REQUESTS.inc()
         start = time.perf_counter()
+        # status defaults to 500: if call_next raises before producing a
+        # response, the request truly failed server-side, so that's the
+        # honest label for the metric we emit in `finally`.
+        status_code = 500
         try:
             response = await call_next(request)
+            status_code = response.status_code
         except Exception:
             elapsed_ms = (time.perf_counter() - start) * 1000.0
             logger.exception("request.failed", elapsed_ms=round(elapsed_ms, 2))
@@ -149,4 +179,13 @@ class RequestContextMiddleware(BaseHTTPMiddleware):
             _inject_cache_headers(request, response)
             return response
         finally:
+            # Emit metrics regardless of success/failure. Route template
+            # is resolved here (post-routing) so the label is bounded.
+            elapsed_s = time.perf_counter() - start
+            template = _route_template(request)
+            ACTIVE_REQUESTS.dec()
+            REQUESTS_TOTAL.labels(
+                method=request.method, path=template, status=str(status_code)
+            ).inc()
+            REQUEST_DURATION.labels(method=request.method, path=template).observe(elapsed_s)
             structlog.contextvars.clear_contextvars()

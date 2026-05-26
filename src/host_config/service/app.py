@@ -25,16 +25,14 @@ will parse it. A breaking change to this envelope is an API break.
 
 from __future__ import annotations
 
-import logging
-import os
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any
 
-import structlog
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from host_config.errors import HostConfigError
+from host_config.logging_config import configure_logging
 from host_config.models.errors import InvariantError
 from host_config.netbox.errors import HostNotFoundError, NetboxQueryError
 from host_config.service.dependencies import make_netbox_client
@@ -43,29 +41,6 @@ from host_config.service.routes import api, ops
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
-
-
-def _configure_logging() -> None:
-    """One-shot structlog config; idempotent so tests can call freely.
-
-    Approach:
-        Routes structlog through stdlib logging at INFO level by default
-        (override with `LOG_LEVEL`). JSON renderer for production; the
-        `KeyValueRenderer` for local dev is left as a future option
-        (current scope: structured logs are JSON everywhere).
-    """
-    level = os.environ.get("LOG_LEVEL", "INFO").upper()
-    logging.basicConfig(level=level, format="%(message)s")
-    structlog.configure(
-        processors=[
-            structlog.contextvars.merge_contextvars,
-            structlog.processors.add_log_level,
-            structlog.processors.TimeStamper(fmt="iso"),
-            structlog.processors.JSONRenderer(),
-        ],
-        wrapper_class=structlog.make_filtering_bound_logger(getattr(logging, level, logging.INFO)),
-        cache_logger_on_first_use=True,
-    )
 
 
 def _error_envelope(
@@ -100,7 +75,7 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 def make_app() -> FastAPI:
     """Build a fresh `FastAPI` instance wired with middleware, routes, handlers."""
-    _configure_logging()
+    configure_logging()
 
     app = FastAPI(
         title="host-config renderer",
