@@ -59,7 +59,22 @@ _DEFAULT_IMAGE_NAME: Final = "ubuntu-noble-base.img"
 # lldpd  — neighbor discovery; useful for verifying NIC assignments.
 # chrony — NTP; avoids cloud-init timing issues in tests.
 # ethtool — NIC diagnostics.
+# RDMA-related packages (linux-modules-extra-virtual, ibverbs-utils,
+# rdma-core, rdmacm-utils) are deliberately NOT installed here. They
+# are installed via cloud-init runcmd in the gpu-b300 user-data template
+# instead, because the libguestfs appliance VM that virt-customize spawns
+# cannot reach archive.ubuntu.com on DO Droplets whose host /etc/resolv.conf
+# points at a systemd-resolved stub (127.0.0.53). Installing inside the
+# guest VM uses QEMU SLIRP networking which has a working DNS forwarder.
 _CUSTOMIZE_PACKAGES: Final = ["lldpd", "chrony", "ethtool"]
+
+# Public SSH key injected into the ubuntu user's authorized_keys by
+# virt-customize when --prepare is used.  The matching private key is at
+# tests/e2e/fixtures/test_vm_key (test infrastructure credential, not a
+# production secret — only grants access to ephemeral lab VMs).
+_E2E_SSH_PUBKEY: Final = (
+    Path(__file__).parents[2] / "tests" / "e2e" / "fixtures" / "test_vm_key.pub"
+)
 
 
 # ---------------------------------------------------------------------------
@@ -266,13 +281,21 @@ def _sha256_of(path: Path) -> str:
 
 
 def _run_virt_customize(image_path: Path) -> None:
-    """Pre-install packages into *image_path* via ``virt-customize``.
+    """Pre-install packages and inject the e2e SSH key into *image_path*.
 
     Args:
         image_path: Path to the qcow2 image to modify in-place.
 
     Raises:
         VirtCustomizeError: ``virt-customize`` exited non-zero.
+
+    Approach:
+        Injects the test SSH public key (``_E2E_SSH_PUBKEY``) into the
+        ``ubuntu`` user's ``authorized_keys`` so e2e tests can SSH into
+        the VM without needing cloud-init to set up keys.  This is
+        orthogonal to cloud-init: the key is baked into the base image,
+        not served by the renderer, so SSH works regardless of whether
+        cloud-init has finished its network stage.
     """
     if not shutil.which("virt-customize"):
         logger.warning(
@@ -281,6 +304,10 @@ def _run_virt_customize(image_path: Path) -> None:
         )
         return
 
+    # Build virt-customize command. SSH key injection is REQUIRED (the e2e
+    # tests need it); package install is BEST-EFFORT (cloud-init runcmd in
+    # the gpu-b300 template installs the RDMA packages on first boot, which
+    # works around libguestfs DNS issues on DO Droplets).
     install_arg = ",".join(_CUSTOMIZE_PACKAGES)
     cmd = [
         "virt-customize",
@@ -288,6 +315,36 @@ def _run_virt_customize(image_path: Path) -> None:
         "--install", install_arg,
         "--run-command", "apt-get clean",
     ]
+
+    # Inject the e2e SSH public key via cloud.cfg.d so cloud-init merges it
+    # into the ubuntu user's authorized_keys on first boot.  We use
+    # cloud.cfg.d rather than --ssh-inject because the ubuntu user doesn't
+    # exist in the base image before cloud-init runs (the Ubuntu cloud image
+    # creates users on first boot); --ssh-inject would fail with "user not found".
+    if _E2E_SSH_PUBKEY.exists():
+        pubkey = _E2E_SSH_PUBKEY.read_text().strip()
+        cloud_cfg = (
+            "# E2E lab test key — injected by prepare_image.py --prepare.\n"
+            "# This is a test infrastructure credential; only authorises\n"
+            "# access to ephemeral lab VMs.\n"
+            "# Matching private key: tests/e2e/fixtures/test_vm_key\n"
+            "ssh_authorized_keys:\n"
+            f"  - {pubkey}\n"
+        )
+        cmd += [
+            "--run-command",
+            f"mkdir -p /etc/cloud/cloud.cfg.d && "
+            f"cat > /etc/cloud/cloud.cfg.d/99-e2e-lab.cfg << 'CLOUDEOF'\n"
+            f"{cloud_cfg}CLOUDEOF",
+        ]
+        logger.info("image.ssh_key_injected", pubkey=str(_E2E_SSH_PUBKEY))
+    else:
+        logger.warning(
+            "image.ssh_key_missing",
+            pubkey=str(_E2E_SSH_PUBKEY),
+            msg="e2e SSH public key not found; VM SSH will require cloud-init user-data to set keys",
+        )
+
     logger.info(
         "image.customizing",
         image=str(image_path),
@@ -300,7 +357,28 @@ def _run_virt_customize(image_path: Path) -> None:
         check=False,
     )
     if result.returncode != 0:
-        raise VirtCustomizeError(image_path, result.returncode, result.stderr)
+        # Retry without --install: libguestfs cannot reach archive.ubuntu.com
+        # on DO Droplets whose host /etc/resolv.conf points at the
+        # systemd-resolved stub (127.0.0.53). Falling back to a network-free
+        # customize still injects the SSH key (the part the e2e tests need);
+        # any RDMA packages the gpu-b300 role needs are installed via
+        # cloud-init runcmd inside the guest VM on first boot.
+        logger.warning(
+            "image.install_failed_falling_back",
+            error=result.stderr[:400],
+            msg="virt-customize --install failed; retrying without packages",
+        )
+        cmd_no_install = [c for i, c in enumerate(cmd)
+                          if c not in {"--install", install_arg}
+                          and not (i > 0 and cmd[i - 1] == "--install")]
+        result = subprocess.run(  # noqa: S603
+            cmd_no_install,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            raise VirtCustomizeError(image_path, result.returncode, result.stderr)
     logger.info("image.customized", image=str(image_path))
 
 

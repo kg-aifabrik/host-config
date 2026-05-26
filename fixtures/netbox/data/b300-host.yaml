@@ -81,7 +81,7 @@ interfaces:
     custom_fields:
       roce_tc: 3
       numa_node: 0
-      sriov_vfs: 16
+      sriov_vfs: 0
       gpu_affinity: GPU0
 
   - name: gpu1
@@ -92,7 +92,7 @@ interfaces:
     custom_fields:
       roce_tc: 3
       numa_node: 0
-      sriov_vfs: 16
+      sriov_vfs: 0
       gpu_affinity: GPU1
 
   - name: gpu2
@@ -103,7 +103,7 @@ interfaces:
     custom_fields:
       roce_tc: 3
       numa_node: 0
-      sriov_vfs: 16
+      sriov_vfs: 0
       gpu_affinity: GPU2
 
   - name: gpu3
@@ -114,7 +114,7 @@ interfaces:
     custom_fields:
       roce_tc: 3
       numa_node: 0
-      sriov_vfs: 16
+      sriov_vfs: 0
       gpu_affinity: GPU3
 
   - name: gpu4
@@ -125,7 +125,7 @@ interfaces:
     custom_fields:
       roce_tc: 3
       numa_node: 1
-      sriov_vfs: 16
+      sriov_vfs: 0
       gpu_affinity: GPU4
 
   - name: gpu5
@@ -136,7 +136,7 @@ interfaces:
     custom_fields:
       roce_tc: 3
       numa_node: 1
-      sriov_vfs: 16
+      sriov_vfs: 0
       gpu_affinity: GPU5
 
   - name: gpu6
@@ -147,7 +147,7 @@ interfaces:
     custom_fields:
       roce_tc: 3
       numa_node: 1
-      sriov_vfs: 16
+      sriov_vfs: 0
       gpu_affinity: GPU6
 
   - name: gpu7
@@ -158,5 +158,5 @@ interfaces:
     custom_fields:
       roce_tc: 3
       numa_node: 1
-      sriov_vfs: 16
+      sriov_vfs: 0
       gpu_affinity: GPU7

@@ -98,6 +98,7 @@
   loop:
     - pyproject.toml
     - uv.lock
+    - README.md
   notify: reload renderer
   become: true
 

@@ -29,10 +29,12 @@
 
     # Droplet configuration — override via -e on the command line.
     lab_droplet_name: "host-config-lab"
-    lab_region: "nyc3"
-    # s-4vcpu-8gb-amd: AMD EPYC, supports nested virtualisation (AMD-V).
-    # Upgrade to c-4 or c2-4vcpu-8gb if you need guaranteed KVM.
-    lab_droplet_size: "s-4vcpu-8gb-amd"
+    lab_region: "tor1"
+    # s-4vcpu-8gb-intel: Premium Intel (4 vCPU / 8 GB / NVMe SSD).
+    # AMD Premium / CPU-Optimised slugs are not exposed on this account
+    # in tor1; this Premium Intel tier still upgrades the e2e VM tests from
+    # SATA to NVMe vs. the basic s-4vcpu-8gb shared-CPU + SATA tier.
+    lab_droplet_size: "s-4vcpu-8gb-intel"
     lab_droplet_image: "ubuntu-24-04-x64"
     lab_droplet_tags:
       - host-config-lab
@@ -71,7 +73,7 @@
 
     - name: Extract Droplet IPv4
       ansible.builtin.set_fact:
-        _droplet_ip: "{{ _droplet.data.ip_address }}"
+        _droplet_ip: "{{ _droplet.data.droplet.networks.v4 | selectattr('type', 'equalto', 'public') | map(attribute='ip_address') | first }}"
 
     # ------------------------------------------------------------------
     # Write local inventory file so deploy-lab.yml can target the Droplet.

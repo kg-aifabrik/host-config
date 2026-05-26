@@ -7,8 +7,17 @@ before that line breaks parsing.
 
 WHY: We keep user-data minimal for the cpu role. The heavy lifting
 (package installs, k8s join, etc.) is the next layer's concern; this
-template only sets the host's identity so it can be reached and the
-next layer can SSH in.
+template only sets the host's identity and applies the network config.
+
+WHY write_files + runcmd instead of the network-config endpoint:
+Cloud-init 25.x (Ubuntu 24.04) does not fetch "network-config" from HTTP
+NoCloud seeds. util.read_seeded() in that version always returns
+network=None for HTTP seeds, causing cloud-init to fall back to a
+DHCP-only config on the first SLIRP NIC. Delivering the Netplan YAML via
+write_files ensures it lands on disk in the config phase (stage 3), and
+"netplan apply" in runcmd (stage 4) activates it before cloud-init reports
+"done". This is a deliberately late application; if an early-stage module
+ever needs the bond+VLANs up, revisit using bootcmd instead.
 #}
 hostname: {{ hostname }}
 fqdn: {{ hostname }}
@@ -18,3 +27,63 @@ manage_etc_hosts: true
    on every boot. With true, a hostname change in Netbox would not
    propagate without manual intervention. #}
 preserve_hostname: false
+
+{# Netplan v2 config delivered via write_files because cloud-init's HTTP
+   NoCloud seed reader (util.read_seeded) never fetches network-config from
+   HTTP seeds in Ubuntu 24.04 cloud-init 25.x. The file is written at 0600
+   to satisfy netplan's strict permissions check introduced in v1.0. #}
+write_files:
+  - path: /etc/netplan/60-lab.yaml
+    permissions: '0600'
+    owner: root:root
+    content: |
+      network:
+        version: 2
+        renderer: networkd
+        ethernets:
+{% for nic in ns_nics %}
+          {{ nic.name }}:
+            match:
+              macaddress: {{ nic.mac }}
+            set-name: {{ nic.name }}
+            mtu: {{ nic.mtu }}
+{% endfor %}
+        bonds:
+          {{ bond.name }}:
+            interfaces:
+{% for member in bond.members %}
+              - {{ member }}
+{% endfor %}
+            mtu: {{ bond.mtu }}
+            parameters:
+              mode: {{ bond.mode }}
+              lacp-rate: {{ bond.lacp_rate }}
+              transmit-hash-policy: {{ bond.transmit_hash_policy }}
+        vlans:
+{% for vlan in vlans %}
+          {{ vlan.name }}:
+            id: {{ vlan.vlan_id }}
+            link: {{ vlan.parent }}
+            mtu: {{ vlan.mtu }}
+            addresses:
+              - {{ vlan.address }}
+{% if vlan.gateway is not none %}
+            routes:
+              - to: default
+                via: {{ vlan.gateway }}
+{% endif %}
+{% if vlan.dns %}
+            nameservers:
+              addresses:
+{% for ns in vlan.dns %}
+                - {{ ns }}
+{% endfor %}
+{% if vlan.search_domain is not none %}
+              search:
+                - {{ vlan.search_domain }}
+{% endif %}
+{% endif %}
+{% endfor %}
+
+runcmd:
+  - netplan apply

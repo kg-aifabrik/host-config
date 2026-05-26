@@ -149,7 +149,7 @@
     url: "http://127.0.0.1:{{ netbox_dev_http_port }}/api/dcim/devices/"
     method: GET
     headers:
-      Authorization: "Token {{ (lookup('ansible.builtin.file', netbox_dev_token_file) | trim) }}"
+      Authorization: "Token {{ api_token_result.stdout_lines | last | trim }}"
     status_code: 200
   register: final_check
   retries: 6

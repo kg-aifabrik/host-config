@@ -149,9 +149,19 @@ class TestGpuB300Templates:
         out = _render("gpu-b300", "user-data.j2", intent)
         parsed = yaml.safe_load(out)
         runcmd: list[object] = parsed["runcmd"]
-        # First command must load the kernel module.
-        assert runcmd[0] == "modprobe rdma_rxe"
-        # One rdma link add per RoCE NIC (8 NICs → 8 entries, plus the modprobe).
+        cmd_strs = [str(c) for c in runcmd]
+        # netplan apply is first, a bond0-up wait second, modprobe rdma_rxe
+        # somewhere after the network-up wait.
+        assert any("netplan apply" in c for c in cmd_strs), "netplan apply missing from runcmd"
+        assert any("ip link show bond0" in c for c in cmd_strs), (
+            "bond0 wait-loop missing from runcmd"
+        )
+        assert any("modprobe rdma_rxe" in c for c in cmd_strs), "modprobe rdma_rxe missing"
+        # netplan apply must come before modprobe rdma_rxe.
+        netplan_idx = next(i for i, c in enumerate(cmd_strs) if "netplan apply" in c)
+        modprobe_idx = next(i for i, c in enumerate(cmd_strs) if "modprobe rdma_rxe" in c)
+        assert netplan_idx < modprobe_idx, "netplan apply must precede modprobe rdma_rxe"
+        # One rdma link add per RoCE NIC (8 NICs → 8 entries).
         rdma_cmds = [c for c in runcmd if isinstance(c, str) and "rdma link add" in c]
         assert len(rdma_cmds) == len(intent.roce_underlays)
         # Each rxe device name must reference its NIC.

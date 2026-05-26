@@ -14,10 +14,22 @@
 # Group membership takes effect on the next login (or `newgrp`). The lab
 # automation scripts use `sg libvirt -c "..."` when they need it immediately.
 
+- name: Load KVM kernel module (kvm_intel or kvm_amd)
+  ansible.builtin.shell: |
+    modprobe kvm_intel 2>/dev/null || modprobe kvm_amd 2>/dev/null || true
+  become: true
+  changed_when: false  # modprobe is idempotent; avoid spurious changed
+
+- name: Stat /dev/kvm
+  ansible.builtin.stat:
+    path: /dev/kvm
+  register: _kvm_stat
+  when: qemu_host_assert_kvm | bool
+
 - name: Assert KVM device is present
   ansible.builtin.assert:
     that:
-      - "'/dev/kvm' is exists"
+      - _kvm_stat.stat.exists
     fail_msg: >-
       /dev/kvm not found. Ensure the host CPU has virtualisation extensions
       enabled and the kvm_intel/kvm_amd kernel module is loaded. To disable

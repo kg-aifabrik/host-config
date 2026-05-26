@@ -60,21 +60,13 @@ server {
 
     # -----------------------------------------------------------------------
     # Manual purge location.
-    # Accepts PURGE <path> and invalidates the cached entry for that key.
-    # Usage: PURGE {{ nginx_cache_purge_path }}/<original-path>
+    # NOTE: proxy_cache_purge requires the ngx_cache_purge third-party
+    # module (not in stock nginx). This endpoint returns 501 in the lab.
+    # Install nginx-extras or libnginx-mod-http-cache-purge to activate.
+    # TODO(M3-2): wire up when component cache tests are implemented.
     # -----------------------------------------------------------------------
     location {{ nginx_cache_purge_path }}/ {
-        # Only accept the PURGE method; everything else is a 405.
-        limit_except PURGE {
-            deny all;
-        }
-
-        # Strip the purge prefix to reconstruct the original cache key.
-        # e.g. PURGE /_purge/v1/render/SN-CPU-001/meta-data
-        #   → proxies to renderer at /v1/render/SN-CPU-001/meta-data
-        #   → nginx evicts that cache key.
-        proxy_pass {{ nginx_cache_renderer_upstream }};
-        proxy_cache_purge seedcache $scheme$host$request_uri;
+        return 501 "Cache purge not available in this build (needs ngx_cache_purge module)\n";
     }
 
     # -----------------------------------------------------------------------

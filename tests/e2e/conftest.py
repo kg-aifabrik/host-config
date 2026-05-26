@@ -38,7 +38,9 @@ _DEFAULT_NETBOX_URL = "http://127.0.0.1:8000"
 _DEFAULT_RENDERER_URL = "http://127.0.0.1:8080"
 _DEFAULT_SEED_SERVER_URL = "http://127.0.0.1:80"
 _DEFAULT_TOKEN_FILE = Path.home() / ".host-config" / "netbox-token"
-_DEFAULT_SSH_KEY = Path.home() / ".ssh" / "id_rsa"
+# Default SSH key for authenticating into test VMs.  This is a test
+# infrastructure key baked into the base image by prepare_image.py --prepare.
+_DEFAULT_SSH_KEY = Path(__file__).parent / "fixtures" / "test_vm_key"
 _DEFAULT_IMAGE_PATH = (
     Path(__file__).parents[2] / "fixtures" / "vms" / "images" / "ubuntu-noble-base.img"
 )

@@ -88,27 +88,19 @@ class TestBuildCmdline:
         assert len(drive_args) == 1
 
     @pytest.mark.fast
-    def test_smbios_type1_serial_set_to_asset_tag(self) -> None:
+    def test_smbios_type1_serial_has_nocloud_seed_url(self) -> None:
+        """type=1 serial embeds ds=nocloud-net;s=<seed_url> for ds-identify."""
         cmd = _base_cmdline()
-        # Find the -smbios type=1 argument.
         smbios_type1 = _find_smbios(cmd, "type=1")
-        assert f"serial={_ASSET_TAG}" in smbios_type1
+        expected_url = f"{_SEED_SERVER}/v1/render/{_ASSET_TAG}/"
+        assert "ds=nocloud-net" in smbios_type1
+        assert f"s={expected_url}" in smbios_type1
 
     @pytest.mark.fast
     def test_smbios_type3_asset_set_to_asset_tag(self) -> None:
         cmd = _base_cmdline()
         smbios_type3 = _find_smbios(cmd, "type=3")
         assert f"asset={_ASSET_TAG}" in smbios_type3
-
-    @pytest.mark.fast
-    def test_fw_cfg_nocloud_seed_url(self) -> None:
-        cmd = _base_cmdline()
-        # Find the -fw_cfg argument value.
-        idx = cmd.index("-fw_cfg")
-        fw_val = cmd[idx + 1]
-        expected_url = f"{_SEED_SERVER}/v1/render/{_ASSET_TAG}/"
-        assert f"s={expected_url}" in fw_val
-        assert "ds=nocloud-net" in fw_val
 
     @pytest.mark.fast
     def test_seed_server_trailing_slash_normalised(self) -> None:
@@ -122,10 +114,34 @@ class TestBuildCmdline:
             tap_nsa=_TAP_NSA,
             tap_nsb=_TAP_NSB,
         )
-        idx = cmd.index("-fw_cfg")
-        fw_val = cmd[idx + 1]
+        smbios_type1 = _find_smbios(cmd, "type=1")
         # Should not contain a double slash before v1.
-        assert "//v1" not in fw_val
+        assert "//v1" not in smbios_type1
+
+    @pytest.mark.fast
+    def test_no_fw_cfg_in_cmdline(self) -> None:
+        """No -fw_cfg argument: seed URL lives in SMBIOS serial, not fw_cfg."""
+        cmd = _base_cmdline()
+        assert "-fw_cfg" not in cmd
+
+    @pytest.mark.fast
+    def test_ssh_host_port_adds_hostfwd_to_mgmt0(self) -> None:
+        """ssh_host_port appends hostfwd to the mgmt0 SLIRP, not a second NIC."""
+        cmd = _base_cmdline(ssh_host_port=2222)
+        netdev_vals = _collect_flag_values(cmd, "-netdev")
+        mgmt0_vals = [v for v in netdev_vals if "id=mgmt0" in v]
+        assert len(mgmt0_vals) == 1
+        assert "hostfwd=tcp::2222-:22" in mgmt0_vals[0]
+        # No second SLIRP NIC should be added.
+        slirp_nics = [v for v in netdev_vals if v.startswith("user,")]
+        assert len(slirp_nics) == 1
+
+    @pytest.mark.fast
+    def test_no_ssh_host_port_no_hostfwd(self) -> None:
+        """Without ssh_host_port, no hostfwd is added."""
+        cmd = _base_cmdline()
+        netdev_vals = _collect_flag_values(cmd, "-netdev")
+        assert not any("hostfwd" in v for v in netdev_vals)
 
     @pytest.mark.fast
     def test_slirp_mgmt_nic_present(self) -> None:

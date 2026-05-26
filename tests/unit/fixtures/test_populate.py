@@ -78,7 +78,11 @@ class TestLoadFixture:
         assert len(ew) == 8
         for i in ew:
             assert i.custom_fields["roce_tc"] == 3
-            assert i.custom_fields["sriov_vfs"] == 16
+            # sriov_vfs is 0 in the lab fixture (QEMU virtio-net-pci doesn't
+            # support SR-IOV, so we deliberately keep this at 0 to avoid
+            # netplan failing to set up bond0 / VLANs). Production Netbox
+            # would carry the real value (e.g. 16).
+            assert i.custom_fields["sriov_vfs"] == 0
 
     @pytest.mark.fast
     def test_missing_file_raises(self, tmp_path: Path) -> None:

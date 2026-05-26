@@ -123,16 +123,35 @@
       register: _nb_token_slurp
       become: true
 
+    - name: Apply Netbox custom-field schema
+      ansible.builtin.shell:
+        cmd: |
+          /opt/host-config/.venv/bin/python - <<'EOF'
+          import sys; sys.path.insert(0, '/opt/host-config/src')
+          import pynetbox
+          from host_config.netbox.schema import apply_schema
+          nb = pynetbox.api('http://127.0.0.1:8000', token='{{ _nb_token_slurp.content | b64decode | trim }}')
+          report = apply_schema(nb)
+          print(report.summary())
+          EOF
+      args:
+        chdir: /opt/host-config
+      environment:
+        PYTHONPATH: "/opt/host-config/src:/opt/host-config"
+      changed_when: true
+      become: true
+      become_user: host-config
+
     - name: Run fixture population script
       ansible.builtin.command:
         cmd: >-
           /opt/host-config/.venv/bin/python
           -m fixtures.netbox.populate
+          --url http://127.0.0.1:8000
+          --token {{ _nb_token_slurp.content | b64decode | trim }}
       args:
         chdir: /opt/host-config
       environment:
-        NETBOX_URL: "http://127.0.0.1:8000"
-        NETBOX_TOKEN: "{{ _nb_token_slurp.content | b64decode | trim }}"
         PYTHONPATH: "/opt/host-config/src:/opt/host-config"
       changed_when: true
       become: true

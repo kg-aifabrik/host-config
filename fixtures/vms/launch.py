@@ -40,6 +40,7 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
+from urllib.parse import urlparse
 
 import structlog
 
@@ -71,6 +72,16 @@ _TAP_GPU_FMT = "tap-{nic_name}"  # e.g. "tap-gpu0"
 
 # Number of E-W RoCE NICs on the B300 shape.
 _B300_ROCE_COUNT = 8
+
+# QEMU SLIRP guest-side IP used for guestfwd (seed server access).
+# When seed_server is a loopback address, SLIRP maps this guest IP to
+# the host's seed server so cloud-init can fetch the NoCloud seed.
+# 10.0.2.100 is outside the SLIRP DHCP range (10.0.2.15) and the
+# standard gateway (10.0.2.2), so it will not conflict.
+_SLIRP_GUESTFWD_IP = "10.0.2.100"
+
+# Hostnames/IPs that refer to the local machine and require guestfwd.
+_LOCAL_HOSTNAMES: frozenset[str] = frozenset({"127.0.0.1", "localhost", "::1"})
 
 
 # ---------------------------------------------------------------------------
@@ -129,6 +140,71 @@ class VMHandle:
 
 
 # ---------------------------------------------------------------------------
+# Private helpers — SLIRP seed-server forwarding.
+# ---------------------------------------------------------------------------
+
+
+def _slirp_hostfwd_suffix(ssh_host_port: int | None) -> str:
+    """Return a ``hostfwd=…`` option suffix for the SLIRP netdev, or "".
+
+    When *ssh_host_port* is set, QEMU will forward connections on
+    ``host:ssh_host_port`` to ``guest:22`` over the SLIRP virtual network.
+    This allows the test runner to SSH into the VM without routing through
+    the OVS bridge.
+
+    We add the hostfwd to the *existing* mgmt0 SLIRP (not a second SLIRP
+    netdev) because cloud-init overwrites networking via networkd and only
+    the mgmt0 NIC retains a DHCP lease; a second SLIRP NIC would lose its
+    IP and the hostfwd would never receive an SSH banner.
+    """
+    if ssh_host_port is None:
+        return ""
+    return f",hostfwd=tcp::{ssh_host_port}-:22"
+
+
+def _slirp_guestfwd_suffix(seed_server: str) -> str:
+    """Return a ``guestfwd=…`` option suffix for the SLIRP netdev, or "".
+
+    QEMU SLIRP gives the guest a virtual network (10.0.2.x) where the
+    host is reachable only via NAT.  Services on the host's loopback
+    (127.0.0.1) are NOT reachable from the guest without an explicit
+    ``guestfwd`` mapping.
+
+    When *seed_server* is a local address, we add::
+
+        guestfwd=tcp:10.0.2.100:PORT-tcp:HOST:PORT
+
+    so cloud-init inside the guest can fetch the NoCloud seed by
+    connecting to 10.0.2.100:PORT, which SLIRP forwards to the host.
+
+    For real seed servers (e.g. ``http://10.42.10.1``) no guestfwd is
+    needed — the VM reaches them via the OVS/TAP NICs or standard NAT.
+    """
+    parsed = urlparse(seed_server)
+    host = parsed.hostname or "127.0.0.1"
+    if host not in _LOCAL_HOSTNAMES:
+        return ""
+    port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    return f",guestfwd=tcp:{_SLIRP_GUESTFWD_IP}:{port}-tcp:{host}:{port}"
+
+
+def _slirp_seed_url(seed_server: str, asset_tag: str) -> str:
+    """Build the NoCloud seed URL as seen from inside the SLIRP guest.
+
+    For local seed servers the guest-side IP (10.0.2.100) replaces the
+    loopback address so cloud-init uses the guestfwd tunnel.
+    For non-local seed servers the URL is built from seed_server directly.
+    """
+    parsed = urlparse(seed_server)
+    host = parsed.hostname or "127.0.0.1"
+    base = seed_server.rstrip("/")
+    if host in _LOCAL_HOSTNAMES:
+        port = parsed.port or (443 if parsed.scheme == "https" else 80)
+        base = f"{parsed.scheme}://{_SLIRP_GUESTFWD_IP}:{port}"
+    return f"{base}/v1/render/{asset_tag}/"
+
+
+# ---------------------------------------------------------------------------
 # Public API.
 # ---------------------------------------------------------------------------
 
@@ -143,6 +219,7 @@ def launch_host(
     vcpus: int = _VM_VCPUS,
     tap_nsa: str = _TAP_NSA,
     tap_nsb: str = _TAP_NSB,
+    ssh_host_port: int | None = None,
     extra_qemu_args: list[str] | None = None,
 ) -> VMHandle:
     """Launch a QEMU VM for *asset_tag* wired to the OVS harness.
@@ -170,6 +247,9 @@ def launch_host(
         vcpus: Number of vCPUs. Defaults to 2.
         tap_nsa: Name of the OVS tap interface for the ``nsa`` NIC.
         tap_nsb: Name of the OVS tap interface for the ``nsb`` NIC.
+        ssh_host_port: When set, the host's ``ssh_host_port`` is forwarded
+            to port 22 inside the VM via QEMU SLIRP hostfwd.  This allows
+            the test runner to SSH in on ``localhost:{ssh_host_port}``.
         extra_qemu_args: Additional raw QEMU arguments appended verbatim
             to the command line. For advanced use (e.g. ``-nographic``
             in CI where no display is attached).
@@ -213,6 +293,7 @@ def launch_host(
         roce_nics=roce_nics,
         memory_mib=memory_mib,
         vcpus=vcpus,
+        ssh_host_port=ssh_host_port,
         extra_args=extra_qemu_args or [],
     )
 
@@ -262,6 +343,7 @@ def build_cmdline(
     roce_nics: list[tuple[str, str, str]] | None = None,
     memory_mib: int = _VM_MEMORY_MIB,
     vcpus: int = _VM_VCPUS,
+    ssh_host_port: int | None = None,
     extra_args: list[str] | None = None,
 ) -> list[str]:
     """Construct the QEMU command line from the given parameters.
@@ -285,6 +367,12 @@ def build_cmdline(
             for CPU-shaped VMs.
         memory_mib: VM RAM in MiB.
         vcpus: vCPU count.
+        ssh_host_port: When set, adds ``hostfwd=tcp::{port}-:22`` to the
+            mgmt0 SLIRP netdev so the test runner can SSH in on
+            ``localhost:{port}``.  Must be added to the *same* SLIRP as
+            guestfwd — a second SLIRP NIC would lose its IP after cloud-init
+            applies the networkd config (which only configures the MACs it
+            knows about).
         extra_args: Appended verbatim after the generated arguments.
 
     Returns:
@@ -299,16 +387,32 @@ def build_cmdline(
         - NICs 3..10 (B300 only): E-W RoCE NICs, each wired to its
           own tap (tap-gpu0..tap-gpu7). No VLAN trunk; independent L3.
 
-        SMBIOS type=1 sets ``serial=<asset_tag>`` so cloud-init's
-        ``DataSourceNoCloud`` reads it as the instance ID.
-        SMBIOS type=3 sets ``asset=<asset_tag>`` as the asset tag field,
-        matching the renderer's ``/v1/render/{asset_tag}/`` URL pattern.
+        SMBIOS type=1 serial carries the NoCloud-net seed URL in the form
+        ``ds=nocloud-net;s=<url>``.  This is the field that the systemd
+        generator ``cloud-init-generator`` inspects (via ``ds-identify``)
+        *before* any services start.  ``ds-identify`` matches
+        ``DI_DMI_PRODUCT_SERIAL`` against ``* ds=nocloud*``; when it
+        matches, cloud-init.target is linked into multi-user.target and
+        cloud-init runs normally.  Without a match, cloud-init is never
+        started — the generator disables it entirely.
 
-        The NoCloud seed URL ``ds=nocloud-net;s=...`` is supplied via
-        the kernel cmdline through SMBIOS so cloud-init picks it up
-        without a secondary config drive.
+        SMBIOS type=3 asset carries the asset tag for external identification
+        (IPMI, auditing).  Cloud-init gets the instance-id from the remote
+        ``meta-data`` served by nginx/renderer.
     """
-    seed_url = f"{seed_server.rstrip('/')}/v1/render/{asset_tag}/"
+    # Seed URL as seen from inside the guest (may differ from seed_server
+    # when the seed server is on the host's loopback — see guestfwd below).
+    seed_url = _slirp_seed_url(seed_server, asset_tag)
+
+    # SLIRP netdev options: base + optional guestfwd for local seed servers
+    # + optional hostfwd for SSH access.  Both must live on the same SLIRP
+    # (mgmt0) — a second SLIRP NIC loses its IP after cloud-init applies
+    # the networkd config.
+    slirp_opts = (
+        f"user,id=mgmt0"
+        f"{_slirp_guestfwd_suffix(seed_server)}"
+        f"{_slirp_hostfwd_suffix(ssh_host_port)}"
+    )
 
     cmd: list[str] = [
         "qemu-system-x86_64",
@@ -318,16 +422,18 @@ def build_cmdline(
         "-cpu", "host",
         # Disk image (copy-on-write from base image).
         "-drive", f"file={image_path},format=qcow2,if=virtio,snapshot=on",
-        # SMBIOS: type=1 serial is used by cloud-init as instance-id.
-        "-smbios", f"type=1,serial={asset_tag}",
-        # SMBIOS: type=3 asset tag is read by cloud-init DataSourceNoCloud.
+        # SMBIOS type=1: serial = NoCloud-net seed URL.
+        # ds-identify (a systemd generator) scans this field for "ds=nocloud"
+        # to decide whether to enable cloud-init before any services start.
+        # Without this, cloud-init-generator disables cloud-init entirely.
+        "-smbios", f"type=1,serial=ds=nocloud-net;s={seed_url}",
+        # SMBIOS type=3: asset = asset_tag for external identification.
         "-smbios", f"type=3,asset={asset_tag}",
-        # Kernel cmdline: inject NoCloud seed URL via SMBIOS ds= parameter.
-        # cloud-init reads this from the QEMU fw_cfg interface.
-        "-fw_cfg", f"name=opt/com.coreos/config,string=ds=nocloud-net;s={seed_url}",
         # NIC 0: SLIRP (user-mode) for out-of-band test-runner access.
+        # guestfwd (if present) allows cloud-init to reach the host's
+        # seed server via the 10.0.2.100 virtual SLIRP address.
         # Does not go through the OVS bridge.
-        "-netdev", "user,id=mgmt0",
+        "-netdev", slirp_opts,
         "-device", "virtio-net-pci,netdev=mgmt0",
         # NIC 1: nsa — wired to the OVS bridge via tap.
         "-netdev", f"tap,id=nsa0,ifname={tap_nsa},script=no,downscript=no",
