@@ -15,5 +15,5 @@ Operational procedures. Each runbook is a step-by-step walkthrough for a specifi
 ## Index
 
 - [Deploy lab to DigitalOcean](deploy-do.md) — provision a DO Droplet, configure the full stack, run E2E tests, and tear it down cleanly.
-- *Debug a failing render* — opens after M2.
-- *Force-evict the nginx cache* — opens after M3.
+- [Debug a failing lab VM cloud-init](debug-cloud-init.md) — diagnostic patterns for e2e VM boot / network / RDMA failures, plus the dev iteration loop (`just lab-refresh`).
+- *Force-evict the nginx cache* — opens after M3 (see `just lab-refresh` in the meantime).

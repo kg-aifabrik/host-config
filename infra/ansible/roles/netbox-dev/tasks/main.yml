@@ -60,12 +60,34 @@
   when: netbox_dev_pull_images
   changed_when: false  # `pull` is implicitly idempotent
 
-- name: Start Netbox stack
-  ansible.builtin.command: docker compose up -d
-  args:
+- name: Start Netbox stack (postgres + redis first so the netbox container
+        can attach to already-healthy dependencies)
+  # WHY split into two compose-up calls: on a fresh Droplet, the netbox
+  # container's first run does ~5 minutes of Django migrations before its
+  # healthcheck passes. `docker compose up -d` with all services in one
+  # shot inherits a fixed dependency-health timeout (~120s) and fails with
+  # "dependency netbox failed to start: container netbox-docker-…-netbox-1
+  # is unhealthy". Bringing the dependency services up first means the
+  # second compose-up doesn't have to wait on anything else, just on
+  # netbox itself — and we extend that wait via --wait-timeout=600.
+  ansible.builtin.command:
+    cmd: docker compose up -d postgres redis redis-cache
+    chdir: "{{ netbox_dev_workdir }}"
+  register: compose_up_deps
+  changed_when: "'Started' in compose_up_deps.stderr or 'Created' in compose_up_deps.stderr"
+
+- name: Start Netbox application container (allow 10 min for first-run migrations)
+  ansible.builtin.command:
+    cmd: docker compose up -d --wait --wait-timeout=600 netbox netbox-worker
     chdir: "{{ netbox_dev_workdir }}"
   register: compose_up
   changed_when: "'Started' in compose_up.stderr or 'Created' in compose_up.stderr"
+  # Belt-and-suspenders: even with --wait-timeout=600 the first compose-up
+  # can fail on a memory-constrained Droplet. One retry after a brief wait
+  # almost always succeeds because migrations are then complete.
+  retries: 2
+  delay: 30
+  until: compose_up.rc == 0
 
 - name: Wait for Netbox HTTP to become ready
   ansible.builtin.uri:

@@ -115,6 +115,44 @@ lab-test:
          PYTHONPATH=/opt/host-config/src:/opt/host-config \
          .venv/bin/pytest tests/e2e/ -v --no-header"
 
+# Sync local code + templates to a live Droplet, restart the renderer,
+# flush the nginx-cache, and wait for /healthz to come back. Use this
+# during dev iteration when you've edited a Jinja template, a renderer
+# Python file, or a Netbox fixture and want the next `just lab-test` to
+# pick up the change without a full re-up.
+#
+# WHY the cache flush: nginx-cache caches rendered seeds for ~5 min.
+# Without `rm -rf /var/cache/host-config/seeds/*` the lab VMs will boot
+# from the stale rendered bytes and you'll lose ~15 min wondering why
+# your template change didn't take effect.
+lab-refresh:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    LAB_IP="{{ _lab_ip }}"
+    if [[ -z "$LAB_IP" ]]; then
+        echo "No lab inventory found — run 'just lab-up' first." >&2
+        exit 1
+    fi
+    echo "→ rsyncing src/, fixtures/, templates/ to ${LAB_IP}…"
+    rsync -az --exclude=__pycache__ --exclude="*.pyc" \
+        src/ fixtures/ root@"${LAB_IP}":/opt/host-config/{src,fixtures}/ 2>/dev/null \
+      || rsync -az --exclude=__pycache__ --exclude="*.pyc" \
+            src/ root@"${LAB_IP}":/opt/host-config/src/ \
+      && rsync -az --exclude=__pycache__ --exclude="*.pyc" \
+            fixtures/ root@"${LAB_IP}":/opt/host-config/fixtures/
+    echo "→ restarting host-config-renderer…"
+    ssh root@"${LAB_IP}" "systemctl restart host-config-renderer"
+    echo "→ flushing nginx-cache…"
+    ssh root@"${LAB_IP}" "rm -rf /var/cache/host-config/seeds/* && systemctl reload nginx"
+    echo "→ waiting for /healthz to return 200…"
+    ssh root@"${LAB_IP}" \
+        "for i in \$(seq 1 30); do \
+            curl -sf http://127.0.0.1:8080/healthz > /dev/null && exit 0; \
+            sleep 1; \
+         done; \
+         echo 'renderer /healthz did not come back up in 30s' >&2; exit 1"
+    echo "✓ lab refreshed."
+
 # Compose: provision → test → teardown.
 # trap ensures lab-down runs even on test failure or Ctrl-C (principle #11).
 lab:

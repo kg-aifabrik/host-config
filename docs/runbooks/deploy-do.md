@@ -27,13 +27,16 @@ SSH_KEY_FINGERPRINT=<fingerprint shown by doctl compute ssh-key list>
 | Variable | Default | Override with |
 |---|---|---|
 | `lab_droplet_name` | `host-config-lab` | `-e lab_droplet_name=my-lab` |
-| `lab_region` | `nyc3` | `-e lab_region=sfo3` |
-| `lab_droplet_size` | `s-4vcpu-8gb-amd` | `-e lab_droplet_size=c-4` |
+| `lab_region` | `tor1` | `-e lab_region=sfo3` |
+| `lab_droplet_size` | `s-4vcpu-8gb-intel` | `-e lab_droplet_size=c-4` |
 
-**KVM note:** the default `s-4vcpu-8gb-amd` shape runs on AMD EPYC
-hardware and typically exposes `/dev/kvm` via AMD-V. If the E2E tests
-skip with `no KVM device`, switch to a CPU-optimized `c-4` or `c2-4vcpu-8gb`
-Droplet which reliably enables nested virtualisation.
+**Size + region note:** the default is the Premium Intel + NVMe tier in
+`tor1`. AMD Droplet slugs (`s-4vcpu-8gb-amd`, `c-4-amd`) are not exposed
+on most DO accounts; if you have one that does, `c-4-amd` (in `blr1` or
+`lon1`) gives dedicated AMD EPYC + NVMe and is the fastest option for
+nested KVM e2e runs. `c-4` (CPU-Optimized Intel) in `lon1` / `blr1` is
+the next best. If you stay in `tor1`, `s-4vcpu-8gb-intel` is the only
+NVMe option.
 
 ## Provisioning
 
