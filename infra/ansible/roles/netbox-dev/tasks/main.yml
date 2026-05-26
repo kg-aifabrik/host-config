@@ -60,36 +60,32 @@
   when: netbox_dev_pull_images
   changed_when: false  # `pull` is implicitly idempotent
 
-- name: Start Netbox stack (postgres + redis first so the netbox container
-        can attach to already-healthy dependencies)
-  # WHY split into two compose-up calls: on a fresh Droplet, the netbox
-  # container's first run does ~5 minutes of Django migrations before its
-  # healthcheck passes. `docker compose up -d` with all services in one
-  # shot inherits a fixed dependency-health timeout (~120s) and fails with
-  # "dependency netbox failed to start: container netbox-docker-…-netbox-1
-  # is unhealthy". Bringing the dependency services up first means the
-  # second compose-up doesn't have to wait on anything else, just on
-  # netbox itself — and we extend that wait via --wait-timeout=600.
+# WHY this three-step dance instead of a single `docker compose up -d`:
+# On a fresh Droplet the netbox container's first run does ~5 minutes of
+# Django migrations before its healthcheck passes. The netbox-worker
+# service declares `depends_on: netbox` with `condition: service_healthy`.
+# A plain `docker compose up -d` therefore tries to start netbox-worker,
+# sees netbox is not yet healthy, and fails fast with "dependency netbox
+# failed to start: container …-netbox-1 is unhealthy" — it does NOT wait
+# out the migrations. (`--wait --wait-timeout=600` doesn't help: compose
+# treats the post-start_period "unhealthy" state as terminal and still
+# bails immediately.)
+#
+# Fix: start netbox WITHOUT its dependents, poll its HTTP endpoint
+# ourselves (no coupling to the container healthcheck's start_period),
+# then bring up netbox-worker once netbox is actually serving.
+- name: Start Netbox application container (without dependents)
+  # `up -d netbox` starts netbox + its own deps (postgres, redis,
+  # redis-cache) but NOT netbox-worker, so there is no service_healthy
+  # gate to fail fast on. No --wait — our own HTTP poll below is the
+  # readiness gate.
   ansible.builtin.command:
-    cmd: docker compose up -d postgres redis redis-cache
-    chdir: "{{ netbox_dev_workdir }}"
-  register: compose_up_deps
-  changed_when: "'Started' in compose_up_deps.stderr or 'Created' in compose_up_deps.stderr"
-
-- name: Start Netbox application container (allow 10 min for first-run migrations)
-  ansible.builtin.command:
-    cmd: docker compose up -d --wait --wait-timeout=600 netbox netbox-worker
+    cmd: docker compose up -d netbox
     chdir: "{{ netbox_dev_workdir }}"
   register: compose_up
   changed_when: "'Started' in compose_up.stderr or 'Created' in compose_up.stderr"
-  # Belt-and-suspenders: even with --wait-timeout=600 the first compose-up
-  # can fail on a memory-constrained Droplet. One retry after a brief wait
-  # almost always succeeds because migrations are then complete.
-  retries: 2
-  delay: 30
-  until: compose_up.rc == 0
 
-- name: Wait for Netbox HTTP to become ready
+- name: Wait for Netbox HTTP to become ready (first-run migrations can take ~5 min)
   ansible.builtin.uri:
     url: "http://127.0.0.1:{{ netbox_dev_http_port }}/api/"
     status_code: [200, 403]  # 403 is "auth required" — proves the server is up
@@ -97,6 +93,15 @@
   until: netbox_ready.status in [200, 403]
   retries: "{{ (netbox_dev_ready_timeout_seconds / 5) | int }}"
   delay: 5
+
+- name: Start remaining Netbox services (worker) now that netbox is healthy
+  # netbox is serving HTTP, so its healthcheck has passed and the worker's
+  # service_healthy dependency is satisfied immediately.
+  ansible.builtin.command:
+    cmd: docker compose up -d
+    chdir: "{{ netbox_dev_workdir }}"
+  register: compose_up_rest
+  changed_when: "'Started' in compose_up_rest.stderr or 'Created' in compose_up_rest.stderr"
 
 # --------------------------------------------------------------------------
 # Bootstrap the superuser and API token. Idempotent: skip if the user

@@ -93,9 +93,41 @@ lab-down:
     cd infra/ansible
     ansible-playbook -i localhost, playbooks/destroy.yml
 
+# Prepare the e2e cloud image on the Droplet.
+#
+# WHY this is its own step (and must run before lab-test): prepare_image
+# --prepare injects the e2e SSH public key (tests/e2e/fixtures/
+# test_vm_key.pub) into the base image so the tests can SSH into the VMs.
+# That key lives under tests/, which the deploy-lab playbook does NOT sync
+# (the renderer role syncs only src/ + fixtures/). So we must rsync tests/
+# to the Droplet BEFORE running prepare_image, or the image is baked
+# without the key and every e2e test fails to connect. This recipe does
+# both in the right order.
+lab-image:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    LAB_IP="{{ _lab_ip }}"
+    if [[ -z "$LAB_IP" ]]; then
+        echo "No lab inventory found — run 'just lab-up' first." >&2
+        exit 1
+    fi
+    echo "→ syncing tests/ (carries the e2e SSH key) + fixtures/ to ${LAB_IP}…"
+    rsync -az --exclude=__pycache__ --exclude="*.pyc" \
+        tests/ root@"${LAB_IP}":/opt/host-config/tests/
+    rsync -az --exclude=__pycache__ --exclude="*.pyc" --exclude=images \
+        fixtures/ root@"${LAB_IP}":/opt/host-config/fixtures/
+    echo "→ preparing cloud image (downloads ~600 MB, injects SSH key)…"
+    ssh root@"${LAB_IP}" \
+        "cd /opt/host-config && uv run python -m fixtures.vms.prepare_image --prepare"
+    echo "✓ e2e image ready."
+
 # Run e2e tests on the Droplet over SSH.
 # The tests run on the Droplet itself so they have access to /dev/kvm,
 # the OVS bridge, and the local lab services.
+#
+# Guards that the prepared image exists (prepare_image runs in lab-image);
+# if it's missing, points the user at `just lab-image` rather than failing
+# deep inside pytest with a skip.
 lab-test:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -109,6 +141,12 @@ lab-test:
     rsync -az --exclude=__pycache__ --exclude="*.pyc" \
         tests/ root@"${LAB_IP}":/opt/host-config/tests/
     rsync -az conftest.py root@"${LAB_IP}":/opt/host-config/conftest.py 2>/dev/null || true
+    # Guard: the prepared image must exist before pytest launches VMs.
+    if ! ssh root@"${LAB_IP}" \
+            "test -f /opt/host-config/fixtures/vms/images/ubuntu-noble-base.img"; then
+        echo "e2e image not found on the Droplet — run 'just lab-image' first." >&2
+        exit 1
+    fi
     # Run e2e tests on the Droplet.
     ssh root@"${LAB_IP}" \
         "cd /opt/host-config && \
@@ -153,13 +191,14 @@ lab-refresh:
          echo 'renderer /healthz did not come back up in 30s' >&2; exit 1"
     echo "✓ lab refreshed."
 
-# Compose: provision → test → teardown.
+# Compose: provision → prepare image → test → teardown.
 # trap ensures lab-down runs even on test failure or Ctrl-C (principle #11).
 lab:
     #!/usr/bin/env bash
     set -euo pipefail
     trap 'just lab-down' EXIT INT TERM
     just lab-up
+    just lab-image
     just lab-test
 
 # Collect renderer / nginx / OVS / cloud-init logs from the Droplet.

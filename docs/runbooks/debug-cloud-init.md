@@ -16,6 +16,29 @@ session so the next debugger doesn't re-derive them from scratch.
 | `bond0` / VLANs / gpu addresses missing but gpu MTU is set | netplan generated the networkd files but networkd hasn't acted on them yet, OR `virtual-function-count: 16` is choking SR-IOV on a virtio-net-pci NIC. See [bond0 doesn't appear](#bond0-doesnt-appear). |
 | `lsmod \| grep rdma_rxe` returns nothing | The cloud-init apt-install of `linux-modules-extra-$(uname -r)` failed. See [apt-install fails inside the VM](#apt-install-fails-inside-the-vm). |
 | Tests pass locally but fail on a freshly-provisioned Droplet | Either the renderer is serving stale cached bytes (see [Renderer + nginx-cache iteration](#renderer--nginx-cache-iteration)) or Netbox's first-run migrations haven't finished. Re-run `just lab-up`; the playbook is idempotent and the second run almost always lands. |
+| Every e2e test fails to SSH into the VM on a fresh Droplet (`Connection refused` / `Permission denied`) | The image was prepared before `tests/e2e/fixtures/test_vm_key.pub` was synced, so the SSH key wasn't baked in. Run `just lab-image` (it syncs `tests/` first, then preps). See [Cold-start order](#cold-start-order). |
+
+## Cold-start order
+
+A fully fresh Droplet must be brought up in this order. `just lab` does
+all of it; if you run the steps by hand, the ordering matters:
+
+1. `just lab-up` — provision the Droplet + run `deploy-lab.yml` (Docker,
+   Netbox, renderer, nginx-cache, OVS, QEMU). The renderer role syncs
+   `src/` + `fixtures/` to the Droplet, **but not `tests/`**.
+2. `just lab-image` — rsync `tests/` (which carries the e2e SSH key at
+   `tests/e2e/fixtures/test_vm_key.pub`) **then** run `prepare_image
+   --prepare`. Order is load-bearing: prepare_image injects that key into
+   the base image, so the key must be on the Droplet first. Skipping this
+   ordering bakes a keyless image and every test fails to connect.
+3. `just lab-test` — sync `tests/`, guard that the prepared image exists,
+   run the e2e suite.
+
+The libguestfs `image.install_failed_falling_back` warning during step 2
+is **expected** on DO (the appliance VM can't reach archive.ubuntu.com via
+the systemd-resolved stub); the SSH key still gets injected, which is all
+the e2e tests strictly need. RDMA packages install inside the guest at
+boot via cloud-init runcmd.
 
 ## Read what cloud-init actually did
 
