@@ -72,8 +72,11 @@ hooks-all:
 # ---------------------------------------------------------------------------
 
 # _lab_ip: read the Droplet IP from the dynamic inventory file.
-# Used by lab-test and lab-logs to target the correct host.
-_lab_ip := `grep -oP '\d+\.\d+\.\d+\.\d+' infra/ansible/inventory/lab 2>/dev/null | head -1 || echo ""`
+# Used by lab-image, lab-test, lab-refresh, and lab-logs to target the host.
+# NOTE: uses `grep -oE` (POSIX extended regex), NOT `-oP` (Perl) — BSD grep
+# on macOS has no -P, which would silently yield an empty IP and break every
+# recipe that targets the Droplet.
+_lab_ip := `grep -oE '[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' infra/ansible/inventory/lab 2>/dev/null | head -1 || echo ""`
 
 # Provision + configure the DO lab.
 # Step 1: create Droplet + write inventory/lab.

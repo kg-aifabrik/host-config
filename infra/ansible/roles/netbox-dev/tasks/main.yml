@@ -94,9 +94,35 @@
   retries: "{{ (netbox_dev_ready_timeout_seconds / 5) | int }}"
   delay: 5
 
+# WHY a SEPARATE docker-health poll after the HTTP poll: the netbox
+# container serving HTTP (200/403) is NOT the same as Docker reporting the
+# container `healthy`. The healthcheck runs on its own interval and, after
+# failing throughout the migration window, needs a fresh successful probe
+# to flip from `unhealthy` back to `healthy`. The next task
+# (`docker compose up -d`) brings up netbox-worker, which declares
+# `depends_on: netbox` with `condition: service_healthy` — and compose
+# evaluates the *Docker* health state, not HTTP. Without this wait, the
+# worker start fails fast with "dependency netbox … is unhealthy" even
+# though the API is already up.
+- name: Wait for the netbox container's Docker healthcheck to report healthy
+  # Resolve the container id via compose (project name varies with the
+  # workdir) and inspect its health state. `docker compose ps -q netbox`
+  # is stable across project-name changes; piping into `xargs docker
+  # inspect` avoids hardcoding netbox-docker-<ver>-netbox-1.
+  ansible.builtin.shell:
+    cmd: >-
+      docker inspect -f '{{ "{{" }}.State.Health.Status{{ "}}" }}'
+      "$(docker compose ps -q netbox)"
+    chdir: "{{ netbox_dev_workdir }}"
+  register: netbox_health
+  changed_when: false
+  until: netbox_health.stdout == "healthy"
+  retries: 24  # 24 × 5s = 2 min; the flip typically lands within 1-2 intervals
+  delay: 5
+
 - name: Start remaining Netbox services (worker) now that netbox is healthy
-  # netbox is serving HTTP, so its healthcheck has passed and the worker's
-  # service_healthy dependency is satisfied immediately.
+  # netbox's Docker healthcheck is green, so the worker's service_healthy
+  # dependency is satisfied immediately.
   ansible.builtin.command:
     cmd: docker compose up -d
     chdir: "{{ netbox_dev_workdir }}"
