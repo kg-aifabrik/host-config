@@ -46,7 +46,7 @@ dev = [
 [tool.ruff]
 line-length = 100
 target-version = "py312"
-src = ["src", "tests", "fixtures"]
+src = ["src", "tests", "fixtures", "scripts"]
 
 [tool.ruff.lint]
 # Curated ruleset per CODE_CONVENTIONS.md §5:
@@ -85,7 +85,7 @@ strict = true
 warn_unreachable = true
 warn_unused_ignores = true
 show_error_codes = true
-files = ["src", "tests", "fixtures"]
+files = ["src", "tests", "fixtures", "scripts"]
 
 # Allow missing import stubs for third-party packages until stubs are added.
 [[tool.mypy.overrides]]

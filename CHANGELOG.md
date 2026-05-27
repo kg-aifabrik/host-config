@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `scripts/validate_h200_host.py` — post-provision validation for a
+  gpu-h200 host. Runs a 12-point checklist (cloud-init done; netplan
+  present; bond0 up + 802.3ad; 3 VLANs up with IPv4; default route; all 8
+  IPoIB rails up/addressed/MTU 2044; mlx5_ib + ib_ipoib loaded; rdma_rxe
+  NOT loaded; ibstat ports Active; ibv_devinfo mlx5 HCAs; RDMA memlock
+  unlimited) and prints a PASS/WARN/FAIL report; exit non-zero on any FAIL.
+  stdlib-only (system `python3`, no venv) with an injectable probe so the
+  checklist is unit-tested (healthy/broken/degraded hosts). `just
+  validate-h200 <host>` streams it over SSH. Documented in the
+  debug-cloud-init runbook.
 - Two GPU roles — `gpu-b200` and `gpu-h200` (ADR-0013). `gpu-b200` mirrors
   `gpu-b300`: both B-series roles run **RoCEv2** (Soft-RoCE in the lab,
   hardware RoCE in production) and now pin each rxe device's rdma_cm

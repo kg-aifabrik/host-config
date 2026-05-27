@@ -224,6 +224,15 @@ lab-logs:
     echo "=== B300 cloud-init serial log ==="
     ssh root@"${LAB_IP}" "cat /tmp/b300-boot.log 2>/dev/null || echo '(not found)'"
 
+# Validate a provisioned gpu-h200 host: streams the validation script over
+# SSH and runs it with the host's system python3 (no copy, no venv needed).
+# Exits non-zero if any check FAILs. Pass extra flags after the host, e.g.
+#   just validate-h200 10.0.0.5 "--json"
+#   just validate-h200 10.0.0.5 "--rails 8 --ipoib-mtu 2044"
+validate-h200 host user="root" args="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    ssh {{ user }}@"{{ host }}" "python3 - {{ args }}" < scripts/validate_h200_host.py
 # ---------------------------------------------------------------------------
 # Hygiene.
 # ---------------------------------------------------------------------------

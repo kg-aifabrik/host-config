@@ -173,3 +173,40 @@ seed (look for the `GET /v1/render/SN-…/user-data` line).
 `docs/artifacts/e2e-run-2026-05-26/` snapshots a fully-passing run. Diff
 a failing rendered seed or boot log against the matching artifact to
 isolate what changed.
+
+## Verify a provisioned gpu-h200 host
+
+`scripts/validate_h200_host.py` runs a checklist against a booted H200 and
+prints a PASS / WARN / FAIL report (exit non-zero on any FAIL). It is
+stdlib-only and runs with the host's system `python3` — no project venv.
+
+```bash
+# From a control node, no copy needed (streams the script over SSH):
+just validate-h200 <host-ip>
+just validate-h200 <host-ip> root "--json"        # machine-readable
+just validate-h200 <host-ip> root "--rails 8 --ipoib-mtu 2044"
+
+# Or on the host directly:
+sudo python3 validate_h200_host.py
+```
+
+What it checks: cloud-init finished; `/etc/netplan/60-lab.yaml` present;
+`bond0` up + 802.3ad; the 3 VLAN children up with IPv4; a default route;
+all 8 IPoIB rails (`ib0..ib7`) up, addressed, MTU 2044; `mlx5_ib` +
+`ib_ipoib` loaded; `rdma_rxe` **not** loaded (H200 is native IB, not
+Soft-RoCE); `ibstat` ports Active; `ibv_devinfo` shows mlx5 HCAs; RDMA
+memlock unlimited.
+
+Status meanings:
+- **FAIL** — the config the gpu-h200 role promises is not in effect
+  (missing bond, rails down, wrong MTU, IB modules absent). Gates the exit
+  code.
+- **WARN** — environmentally dependent, not a host-config fault: `ibstat`
+  ports `Initializing` (no subnet manager on the fabric yet), `rdma_rxe`
+  unexpectedly loaded, or a verbs device that's `rxe` instead of `mlx5`.
+- **SKIP** — a diagnostic tool isn't installed (`ibstat`/`ibv_devinfo`
+  come from `infiniband-diags` / `ibverbs-utils`).
+
+A `WARN` for `ib-ports` usually just means the subnet manager (`opensm`,
+normally on the Quantum-2 switch) hasn't brought the links to `Active`
+yet — the host's own config is fine.
