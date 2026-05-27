@@ -190,6 +190,44 @@ just validate-h200 <host-ip> root "--rails 8 --ipoib-mtu 2044"
 sudo python3 validate_h200_host.py
 ```
 
+Sample output (a healthy host whose fabric subnet manager hasn't finished
+bringing the links up yet, and without the InfiniBand diag tools installed):
+
+```text
+H200 host validation
+============================================================
+[PASS]  cloud-init      status: done
+[PASS]  netplan-config  /etc/netplan/60-lab.yaml present
+[PASS]  bond0           bond0 UP
+[PASS]  bond0-lacp      802.3ad with 2 members
+[PASS]  vlans           3 VLANs up w/ IPv4 (bond0.100,bond0.200,bond0.300)
+[PASS]  default-route   default via 10.42.10.1 dev bond0.100
+[PASS]  ipoib-rails     8 IPoIB rails up, addressed, MTU 2044
+[PASS]  ib-modules      mlx5_ib + ib_ipoib loaded
+[PASS]  no-soft-roce    rdma_rxe not loaded (native IB)
+[WARN]  ib-ports        1/2 ports Active (rest Initializing → no subnet manager?)
+[SKIP]  verbs-devices   ibv_devinfo not installed (ibverbs-utils)
+[PASS]  memlock         memlock unlimited configured
+------------------------------------------------------------
+10 passed, 1 warned, 1 skipped, 0 failed
+verdict: OK
+```
+
+`verdict: OK` (and exit 0) because WARN/SKIP don't gate — only FAIL does. A
+failing host looks like this (and exits 1):
+
+```text
+[FAIL]  bond0           bond0 does not exist
+[FAIL]  ipoib-rails     missing: ib3,ib4; down: ib5; wrong-mtu (want 2044): ib6(mtu=1500)
+[FAIL]  ib-modules      missing kernel module(s): ib_ipoib
+...
+3 passed, 0 warned, 2 skipped, 7 failed
+verdict: FAIL
+```
+
+`--json` emits the same data as `{"checks": [...], "summary": {...},
+"verdict": "OK|FAIL"}` for piping into CI or a dashboard.
+
 What it checks: cloud-init finished; `/etc/netplan/60-lab.yaml` present;
 `bond0` up + 802.3ad; the 3 VLAN children up with IPv4; a default route;
 all 8 IPoIB rails (`ib0..ib7`) up, addressed, MTU 2044; `mlx5_ib` +

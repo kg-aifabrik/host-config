@@ -41,12 +41,35 @@ just lab
 
 # Iterate on a live Droplet after editing a template / renderer / fixture:
 just lab-refresh    # rsync + restart renderer + flush nginx-cache + wait /healthz
+
+# Validate a provisioned gpu-h200 host (PASS/WARN/FAIL report; non-zero on FAIL)
+just validate-h200 <host-ip>
 ```
 
 > **Cold-start ordering matters:** `lab-image` runs after `lab-up` and
 > before `lab-test` — it injects the e2e SSH key into the base image, and
 > that key (under `tests/`) isn't synced by `lab-up`. `just lab` sequences
 > these correctly. See [docs/runbooks/debug-cloud-init.md](docs/runbooks/debug-cloud-init.md).
+
+## Validating a provisioned host
+
+After a host boots, `scripts/validate_h200_host.py` runs a checklist against
+a `gpu-h200` host (cloud-init done; bond0/VLANs/default route; all 8 IPoIB
+rails up at MTU 2044; `mlx5_ib`/`ib_ipoib` loaded; `rdma_rxe` *not* loaded;
+`ibstat`/`ibv_devinfo`/memlock) and prints a PASS/WARN/FAIL report, exiting
+non-zero on any FAIL so CI/automation can gate on it. It is stdlib-only —
+runs with the host's system `python3`, no project venv.
+
+```bash
+just validate-h200 <host-ip>            # streams the script over SSH
+just validate-h200 <host-ip> root "--json"   # machine-readable
+sudo python3 scripts/validate_h200_host.py    # on the host directly
+```
+
+WARN = environment-dependent (e.g. no subnet manager yet); FAIL = the
+gpu-h200 config isn't in effect. See the runbook for the full checklist,
+sample output, and status semantics:
+[docs/runbooks/debug-cloud-init.md → Verify a provisioned gpu-h200 host](docs/runbooks/debug-cloud-init.md#verify-a-provisioned-gpu-h200-host).
 
 ## Configuration
 
