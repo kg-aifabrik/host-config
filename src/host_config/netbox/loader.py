@@ -40,7 +40,12 @@ from typing import TYPE_CHECKING, Any
 
 from host_config.models.errors import InvariantError
 from host_config.models.intent import HostIntent, Role
-from host_config.models.interface import Bond, BondMember, RoceUnderlay
+from host_config.models.interface import (
+    Bond,
+    BondMember,
+    InfinibandUnderlay,
+    RoceUnderlay,
+)
 from host_config.models.vlan import VlanChild, VlanRole
 from host_config.netbox.errors import HostNotFoundError, NetboxQueryError
 
@@ -54,6 +59,7 @@ logger = logging.getLogger(__name__)
 BOND_NAME = "bond0"
 NS_NIC_NAMES = ("nsa", "nsb")
 ROCE_NIC_PREFIX = "gpu"
+IB_NIC_PREFIX = "ib"
 VLAN_NAME_PREFIX = "bond0."
 
 
@@ -117,6 +123,7 @@ def load_host_intent(client: pynetbox.api, asset_tag: str) -> HostIntent:
     bond = _build_bond(interfaces, ns_nics, asset_tag)
     vlans = _build_vlans(client, interfaces, asset_tag)
     roce_underlays = _build_roce_underlays(client, interfaces, asset_tag)
+    ib_underlays = _build_ib_underlays(client, interfaces, asset_tag)
 
     try:
         intent = HostIntent(
@@ -127,18 +134,20 @@ def load_host_intent(client: pynetbox.api, asset_tag: str) -> HostIntent:
             bond=bond,
             vlans=vlans,
             roce_underlays=roce_underlays,
+            ib_underlays=ib_underlays,
         )
     except InvariantError:
         # Re-raise unchanged; the invariant carries its own context.
         raise
 
     logger.info(
-        "load_host_intent.done asset_tag=%s role=%s ns_nics=%d vlans=%d roce=%d",
+        "load_host_intent.done asset_tag=%s role=%s ns_nics=%d vlans=%d roce=%d ib=%d",
         asset_tag,
         role.value,
         len(ns_nics),
         len(vlans),
         len(roce_underlays),
+        len(ib_underlays),
     )
     return intent
 
@@ -299,6 +308,41 @@ def _build_roce_underlays(
             )
         )
     # Sort by name so gpu0..gpu7 ordering is stable for golden-file tests.
+    underlays.sort(key=lambda u: u.name)
+    return underlays
+
+
+def _build_ib_underlays(
+    client: pynetbox.api, interfaces: Iterable[Any], asset_tag: str
+) -> list[InfinibandUnderlay]:
+    """Build InfinibandUnderlay models for every IPoIB NIC (ib0..ib7).
+
+    Returns an empty list for non-InfiniBand hosts (none of their
+    interfaces match the ``ibN`` naming convention). The HostIntent
+    role-count invariant enforces "exactly 8" for gpu-h200 and "zero"
+    elsewhere.
+
+    Unlike RoCE underlays, IB underlays carry no ``sriov_vfs`` — InfiniBand
+    RDMA is native to the HCA and IB SR-IOV is configured out-of-band, not
+    via first-boot Netplan.
+    """
+    underlays: list[InfinibandUnderlay] = []
+    for iface in interfaces:
+        if not iface.name.startswith(IB_NIC_PREFIX):
+            continue
+        # Only plain "ibN" (defensive against e.g. "ibsm0" or a bridge).
+        if not iface.name[len(IB_NIC_PREFIX) :].isdigit():
+            continue
+
+        mac = _read_mac(iface, asset_tag)
+        # IPoIB datagram-mode default MTU is 2044.
+        mtu = _read_mtu(iface, asset_tag, default=2044)
+        address = _fetch_single_ip(client, iface, asset_tag)
+
+        underlays.append(
+            InfinibandUnderlay(name=iface.name, mac=mac, mtu=mtu, address=address)
+        )
+    # Sort by name so ib0..ib7 ordering is stable for golden-file tests.
     underlays.sort(key=lambda u: u.name)
     return underlays
 

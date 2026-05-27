@@ -172,10 +172,45 @@ class RoceUnderlay(SriovParent):
     address: IPv4Interface
 
 
+class InfinibandUnderlay(PhysIface):
+    """A PhysIface used as an IPoIB underlay on an InfiniBand fabric.
+
+    Approach:
+        The east-west analogue of `RoceUnderlay` for InfiniBand hosts
+        (e.g. gpu-h200). Carries the host-side IPoIB address used for
+        bootstrap / control-plane traffic; bulk RDMA is native to the
+        HCA and bypasses IP entirely.
+
+        Deliberately does NOT extend `SriovParent`: InfiniBand RDMA is
+        done in hardware on the HCA — there is no Soft-RoCE substrate and
+        no Netplan `virtual-function-count` to emit. IB SR-IOV exists but
+        is configured out-of-band (the subnet manager + the HCA firmware),
+        not via the first-boot Netplan, so it is not modeled here.
+
+    WHY no `mac` override: the model keeps the inherited 6-byte `mac`
+        field as a *placeholder/identifier*. Real ConnectX IPoIB ports
+        present a 20-byte hardware address and a port GUID, not a 6-byte
+        MAC — the renderer's network-config carries a note that hardware
+        matching should be by name/GUID. Modeling it as `mac` keeps IB
+        and Ethernet underlays uniform for templating; see ADR-0013.
+
+    Scenarios:
+        - Happy path: InfinibandUnderlay(name="ib0", mac=..., mtu=2044,
+          address="10.42.100.10/24") constructs cleanly.
+        - Missing address → raises.
+        - All PhysIface scenarios still apply (MAC shape, MTU bounds).
+    """
+
+    # IPoIB host address (e.g., "10.42.100.10/24"). MTU is typically 2044
+    # (datagram mode); the field uses the shared [1500, 9216] bound.
+    address: IPv4Interface
+
+
 __all__ = [
     "Bond",
     "BondMember",
     "BondMode",
+    "InfinibandUnderlay",
     "LacpRate",
     "PhysIface",
     "RoceUnderlay",

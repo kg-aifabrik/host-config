@@ -1,0 +1,148 @@
+# H200 GPU host fixture — the gpu-h200 role (InfiniBand backend).
+#
+# 10 NICs: 2 N-S (BlueField-3) + 8 east-west InfiniBand NDR HCA ports as
+# IPoIB (ib0..ib7). Unlike the RoCE roles (gpu-b300 / gpu-b200), the
+# east-west fabric is InfiniBand — native HCA RDMA, no Soft-RoCE, no
+# SR-IOV/virtual-function-count, IPoIB MTU 2044 (datagram default).
+#
+# Keep in lock-step with make_h200_intent() in
+# tests/unit/models/test_intent.py.
+#
+# Placeholder MACs on ib* are an identifier convenience; real ConnectX
+# IPoIB ports match by GUID/name (see docs/adr/0013).
+
+asset_tag: SN-GPU-H200-001
+hostname: gpu-h200-01.pod07.site03.internal
+device_role: gpu-h200
+site: site03
+
+device_type:
+  manufacturer: NVIDIA
+  model: HGX H200
+  slug: hgx-h200
+  u_height: 8
+
+device_custom_fields:
+  bf3_mode: nic
+
+vlans:
+  - vid: 100
+    name: mgmt
+  - vid: 200
+    name: storage
+  - vid: 300
+    name: ingress
+
+interfaces:
+  # --- N-S NICs (BlueField-3 DPU pair) ---
+  - name: nsa
+    type: 200gbase-x-qsfp56
+    mac: aa:bb:cc:00:02:01
+    mtu: 9000
+
+  - name: nsb
+    type: 200gbase-x-qsfp56
+    mac: aa:bb:cc:00:02:02
+    mtu: 9000
+
+  # --- LACP bond + VLAN trunk ---
+  - name: bond0
+    type: lag
+    mtu: 9000
+    lag_members: [nsa, nsb]
+
+  - name: bond0.100
+    type: virtual
+    mtu: 1500
+    parent: bond0
+    untagged_vlan: 100
+    ip: 10.42.10.30/24
+
+  - name: bond0.200
+    type: virtual
+    mtu: 9000
+    parent: bond0
+    untagged_vlan: 200
+    ip: 10.42.20.30/24
+
+  - name: bond0.300
+    type: virtual
+    mtu: 1500
+    parent: bond0
+    untagged_vlan: 300
+    ip: 10.42.30.30/24
+
+  # --- East-west InfiniBand underlay (8x ConnectX-7 NDR, IPoIB) ---
+  # type: infiniband-ndr (Netbox NDR InfiniBand interface type). MTU 2044
+  # is the IPoIB datagram-mode default. No roce_tc/sriov_vfs — IB-specific.
+  - name: ib0
+    type: infiniband-ndr
+    mac: aa:bb:cc:00:0e:00
+    mtu: 2044
+    ip: 10.42.100.10/24
+    custom_fields:
+      numa_node: 0
+      gpu_affinity: GPU0
+
+  - name: ib1
+    type: infiniband-ndr
+    mac: aa:bb:cc:00:0e:01
+    mtu: 2044
+    ip: 10.42.101.10/24
+    custom_fields:
+      numa_node: 0
+      gpu_affinity: GPU1
+
+  - name: ib2
+    type: infiniband-ndr
+    mac: aa:bb:cc:00:0e:02
+    mtu: 2044
+    ip: 10.42.102.10/24
+    custom_fields:
+      numa_node: 0
+      gpu_affinity: GPU2
+
+  - name: ib3
+    type: infiniband-ndr
+    mac: aa:bb:cc:00:0e:03
+    mtu: 2044
+    ip: 10.42.103.10/24
+    custom_fields:
+      numa_node: 0
+      gpu_affinity: GPU3
+
+  - name: ib4
+    type: infiniband-ndr
+    mac: aa:bb:cc:00:0e:04
+    mtu: 2044
+    ip: 10.42.104.10/24
+    custom_fields:
+      numa_node: 1
+      gpu_affinity: GPU4
+
+  - name: ib5
+    type: infiniband-ndr
+    mac: aa:bb:cc:00:0e:05
+    mtu: 2044
+    ip: 10.42.105.10/24
+    custom_fields:
+      numa_node: 1
+      gpu_affinity: GPU5
+
+  - name: ib6
+    type: infiniband-ndr
+    mac: aa:bb:cc:00:0e:06
+    mtu: 2044
+    ip: 10.42.106.10/24
+    custom_fields:
+      numa_node: 1
+      gpu_affinity: GPU6
+
+  - name: ib7
+    type: infiniband-ndr
+    mac: aa:bb:cc:00:0e:07
+    mtu: 2044
+    ip: 10.42.107.10/24
+    custom_fields:
+      numa_node: 1
+      gpu_affinity: GPU7

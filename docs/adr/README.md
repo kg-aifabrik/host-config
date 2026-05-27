@@ -36,3 +36,4 @@ The eleven seed ADRs landing in M0-4:
 Later ADRs land as decisions cross the bar.
 
 - `0012` — Deferred signed-seed delivery (TLS + HMAC): v1 serves seeds over plain HTTP on the management VLAN; TLS placeholder in nginx config reserved for promotion to production
+- `0013` — GPU roles `gpu-b200` (RoCE, mirrors b300) and `gpu-h200` (InfiniBand/IPoIB backend): new `InfinibandUnderlay` model + `ib_underlays` field; RoCE/IB count invariants enforce the per-role split

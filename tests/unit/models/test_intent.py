@@ -34,7 +34,12 @@ from pydantic import ValidationError
 
 from host_config.models.errors import InvariantError
 from host_config.models.intent import HostIntent, Role
-from host_config.models.interface import Bond, BondMember, RoceUnderlay
+from host_config.models.interface import (
+    Bond,
+    BondMember,
+    InfinibandUnderlay,
+    RoceUnderlay,
+)
 from host_config.models.vlan import VlanChild, VlanRole
 
 # ---------------------------------------------------------------------------
@@ -155,6 +160,131 @@ def make_b300_intent() -> HostIntent:
     )
 
 
+def make_b200_intent() -> HostIntent:
+    """A valid `gpu-b200`-role `HostIntent` mirroring `b200-host.yaml`.
+
+    gpu-b200 is topologically identical to gpu-b300: 2 N-S NICs + 8 RoCE
+    underlays. It exists as a distinct role so the renderer can diverge
+    later (different firmware/driver pins) without disturbing b300.
+
+    sriov_vfs=0 here (and in the fixture) is the lab-safe value — QEMU
+    virtio-net-pci has no SR-IOV, and a non-zero virtual-function-count
+    blocks netplan from bringing up the bond/VLANs/addresses. Keep the
+    factory and the YAML fixture in lock-step so the golden stays byte-equal
+    to a live-Netbox render.
+    """
+    roce = [
+        RoceUnderlay(
+            name=f"gpu{i}",
+            mac=f"aa:bb:cc:00:03:{0x10 + i:02x}",
+            mtu=9000,
+            sriov_vfs=0,
+            address=IPv4Interface(f"10.42.{100 + i}.24/24"),
+        )
+        for i in range(8)
+    ]
+    return HostIntent(
+        asset_tag="SN-GPU-B200-001",
+        hostname="gpu-b200-01.pod07.site03.internal",
+        role=Role.GPU_B200,
+        ns_nics=[
+            BondMember(name="nsa", mac="aa:bb:cc:00:03:01", mtu=9000),
+            BondMember(name="nsb", mac="aa:bb:cc:00:03:02", mtu=9000),
+        ],
+        bond=Bond(name="bond0", members=["nsa", "nsb"], mtu=9000),
+        vlans=[
+            VlanChild(
+                name="bond0.100",
+                parent="bond0",
+                vlan_id=100,
+                role=VlanRole.MGMT,
+                mtu=1500,
+                address=IPv4Interface("10.42.10.24/24"),
+                gateway=IPv4Address("10.42.10.1"),
+            ),
+            VlanChild(
+                name="bond0.200",
+                parent="bond0",
+                vlan_id=200,
+                role=VlanRole.STORAGE,
+                mtu=9000,
+                address=IPv4Interface("10.42.20.24/24"),
+            ),
+            VlanChild(
+                name="bond0.300",
+                parent="bond0",
+                vlan_id=300,
+                role=VlanRole.INGRESS,
+                mtu=1500,
+                address=IPv4Interface("10.42.30.24/24"),
+            ),
+        ],
+        roce_underlays=roce,
+    )
+
+
+def make_h200_intent() -> HostIntent:
+    """A valid `gpu-h200`-role `HostIntent` mirroring `h200-host.yaml`.
+
+    InfiniBand backend: 8 IPoIB underlays (ib0..ib7), one /24 per rail,
+    MTU 2044 (datagram default). No RoCE, no SR-IOV — IB does RDMA in
+    hardware. The N-S subsystem is identical to the other roles.
+
+    Placeholder MACs on the ib* NICs are an identifier convenience; real
+    ConnectX IPoIB ports match by GUID/name (see ADR-0013).
+
+    If you change any value here, update `fixtures/netbox/data/h200-host.yaml`
+    and regenerate the goldens (`src/host_config/render/golden/gpu-h200/*`).
+    """
+    ib = [
+        InfinibandUnderlay(
+            name=f"ib{i}",
+            mac=f"aa:bb:cc:00:0e:{i:02x}",
+            mtu=2044,
+            address=IPv4Interface(f"10.42.{100 + i}.10/24"),
+        )
+        for i in range(8)
+    ]
+    return HostIntent(
+        asset_tag="SN-GPU-H200-001",
+        hostname="gpu-h200-01.pod07.site03.internal",
+        role=Role.GPU_H200,
+        ns_nics=[
+            BondMember(name="nsa", mac="aa:bb:cc:00:02:01", mtu=9000),
+            BondMember(name="nsb", mac="aa:bb:cc:00:02:02", mtu=9000),
+        ],
+        bond=Bond(name="bond0", members=["nsa", "nsb"], mtu=9000),
+        vlans=[
+            VlanChild(
+                name="bond0.100",
+                parent="bond0",
+                vlan_id=100,
+                role=VlanRole.MGMT,
+                mtu=1500,
+                address=IPv4Interface("10.42.10.30/24"),
+                gateway=IPv4Address("10.42.10.1"),
+            ),
+            VlanChild(
+                name="bond0.200",
+                parent="bond0",
+                vlan_id=200,
+                role=VlanRole.STORAGE,
+                mtu=9000,
+                address=IPv4Interface("10.42.20.30/24"),
+            ),
+            VlanChild(
+                name="bond0.300",
+                parent="bond0",
+                vlan_id=300,
+                role=VlanRole.INGRESS,
+                mtu=1500,
+                address=IPv4Interface("10.42.30.30/24"),
+            ),
+        ],
+        ib_underlays=ib,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Happy paths
 # ---------------------------------------------------------------------------
@@ -183,6 +313,24 @@ class TestHappyPaths:
         intent = make_b300_intent()
         assert intent.role is Role.GPU_B300
         assert len(intent.roce_underlays) == 8
+
+    @pytest.mark.fast
+    def test_b200_intent_constructs(self) -> None:
+        """A clean gpu-b200-role intent has 8 RoCE underlays and no IB underlays."""
+        intent = make_b200_intent()
+        assert intent.role is Role.GPU_B200
+        assert len(intent.roce_underlays) == 8
+        assert intent.ib_underlays == []
+
+    @pytest.mark.fast
+    def test_h200_intent_constructs(self) -> None:
+        """A clean gpu-h200-role intent has 8 InfiniBand underlays and no RoCE."""
+        intent = make_h200_intent()
+        assert intent.role is Role.GPU_H200
+        assert len(intent.ib_underlays) == 8
+        assert intent.roce_underlays == []
+        # IPoIB datagram MTU on every rail.
+        assert all(u.mtu == 2044 for u in intent.ib_underlays)
 
 
 # ---------------------------------------------------------------------------
@@ -383,6 +531,68 @@ class TestCrossFieldInvariants:
         with pytest.raises(InvariantError) as exc:
             HostIntent.model_validate(data)
         assert exc.value.invariant == "roce-count-gpu-b300"
+
+    @pytest.mark.fast
+    def test_gpu_b200_with_seven_roce_raises(self) -> None:
+        """gpu-b200 role with 7 RoCE underlays → InvariantError roce-count-gpu-b200."""
+        intent = make_b200_intent()
+        data = intent.model_dump()
+        data["roce_underlays"] = data["roce_underlays"][:7]
+        with pytest.raises(InvariantError) as exc:
+            HostIntent.model_validate(data)
+        assert exc.value.invariant == "roce-count-gpu-b200"
+
+    @pytest.mark.fast
+    def test_gpu_h200_with_seven_ib_raises(self) -> None:
+        """gpu-h200 role with 7 IB underlays → InvariantError ib-count-gpu-h200."""
+        intent = make_h200_intent()
+        data = intent.model_dump()
+        data["ib_underlays"] = data["ib_underlays"][:7]
+        with pytest.raises(InvariantError) as exc:
+            HostIntent.model_validate(data)
+        assert exc.value.invariant == "ib-count-gpu-h200"
+
+    @pytest.mark.fast
+    def test_gpu_h200_with_roce_raises(self) -> None:
+        """gpu-h200 role carrying RoCE underlays → InvariantError roce-count-gpu-h200."""
+        intent = make_h200_intent()
+        data = intent.model_dump()
+        # Borrow a RoCE underlay shape; an IB host must carry zero of them.
+        data["roce_underlays"] = [
+            cast(
+                dict[str, Any],
+                {
+                    "name": "gpu0",
+                    "mac": "aa:bb:cc:00:02:10",
+                    "mtu": 9000,
+                    "sriov_vfs": 0,
+                    "address": "10.42.200.10/24",
+                },
+            )
+        ]
+        with pytest.raises(InvariantError) as exc:
+            HostIntent.model_validate(data)
+        assert exc.value.invariant == "roce-count-gpu-h200"
+
+    @pytest.mark.fast
+    def test_gpu_b300_with_ib_raises(self) -> None:
+        """A RoCE role (gpu-b300) carrying IB underlays → InvariantError ib-count-gpu-b300."""
+        intent = make_b300_intent()
+        data = intent.model_dump()
+        data["ib_underlays"] = [
+            cast(
+                dict[str, Any],
+                {
+                    "name": "ib0",
+                    "mac": "aa:bb:cc:00:00:e0",
+                    "mtu": 2044,
+                    "address": "10.42.200.10/24",
+                },
+            )
+        ]
+        with pytest.raises(InvariantError) as exc:
+            HostIntent.model_validate(data)
+        assert exc.value.invariant == "ib-count-gpu-b300"
 
     @pytest.mark.fast
     def test_duplicate_ip_across_vlans_raises(self) -> None:

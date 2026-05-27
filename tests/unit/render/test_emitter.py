@@ -30,7 +30,12 @@ from jinja2 import UndefinedError
 from host_config.models.intent import HostIntent
 from host_config.render import emitter as emitter_mod
 from host_config.render.emitter import FileKind, render_for
-from tests.unit.models.test_intent import make_b300_intent, make_cpu_intent
+from tests.unit.models.test_intent import (
+    make_b200_intent,
+    make_b300_intent,
+    make_cpu_intent,
+    make_h200_intent,
+)
 
 GOLDEN_ROOT = Path(__file__).parents[3] / "src" / "host_config" / "render" / "golden"
 
@@ -61,7 +66,12 @@ class TestGoldens:
     @pytest.mark.fast
     @pytest.mark.parametrize(
         ("role", "factory"),
-        [("cpu", make_cpu_intent), ("gpu-b300", make_b300_intent)],
+        [
+            ("cpu", make_cpu_intent),
+            ("gpu-b300", make_b300_intent),
+            ("gpu-b200", make_b200_intent),
+            ("gpu-h200", make_h200_intent),
+        ],
     )
     @pytest.mark.parametrize("kind", list(FileKind))
     def test_render_matches_golden(self, role: str, factory: object, kind: FileKind) -> None:
@@ -201,7 +211,11 @@ def _intents_strategy() -> st.SearchStrategy[HostIntent]:
 
     @st.composite
     def _build(draw: st.DrawFn) -> HostIntent:
-        factory = draw(st.sampled_from([make_cpu_intent, make_b300_intent]))
+        factory = draw(
+            st.sampled_from(
+                [make_cpu_intent, make_b300_intent, make_b200_intent, make_h200_intent]
+            )
+        )
         intent = factory()
         seed = draw(st.integers(min_value=0, max_value=10_000))
         rng = random.Random(seed)  # noqa: S311 — non-crypto; deterministic shuffle for test
@@ -209,6 +223,7 @@ def _intents_strategy() -> st.SearchStrategy[HostIntent]:
         rng.shuffle(dumped["ns_nics"])
         rng.shuffle(dumped["vlans"])
         rng.shuffle(dumped["roce_underlays"])
+        rng.shuffle(dumped["ib_underlays"])
         rng.shuffle(dumped["bond"]["members"])
         return HostIntent.model_validate(dumped)
 

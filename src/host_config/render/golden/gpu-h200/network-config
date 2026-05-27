@@ -1,0 +1,105 @@
+network:
+  version: 2
+  renderer: networkd
+
+  ethernets:
+    nsa:
+      match:
+        macaddress: aa:bb:cc:00:02:01
+      set-name: nsa
+      mtu: 9000
+    nsb:
+      match:
+        macaddress: aa:bb:cc:00:02:02
+      set-name: nsb
+      mtu: 9000
+    ib0:
+      match:
+        macaddress: aa:bb:cc:00:0e:00
+      set-name: ib0
+      mtu: 2044
+      addresses:
+        - 10.42.100.10/24
+    ib1:
+      match:
+        macaddress: aa:bb:cc:00:0e:01
+      set-name: ib1
+      mtu: 2044
+      addresses:
+        - 10.42.101.10/24
+    ib2:
+      match:
+        macaddress: aa:bb:cc:00:0e:02
+      set-name: ib2
+      mtu: 2044
+      addresses:
+        - 10.42.102.10/24
+    ib3:
+      match:
+        macaddress: aa:bb:cc:00:0e:03
+      set-name: ib3
+      mtu: 2044
+      addresses:
+        - 10.42.103.10/24
+    ib4:
+      match:
+        macaddress: aa:bb:cc:00:0e:04
+      set-name: ib4
+      mtu: 2044
+      addresses:
+        - 10.42.104.10/24
+    ib5:
+      match:
+        macaddress: aa:bb:cc:00:0e:05
+      set-name: ib5
+      mtu: 2044
+      addresses:
+        - 10.42.105.10/24
+    ib6:
+      match:
+        macaddress: aa:bb:cc:00:0e:06
+      set-name: ib6
+      mtu: 2044
+      addresses:
+        - 10.42.106.10/24
+    ib7:
+      match:
+        macaddress: aa:bb:cc:00:0e:07
+      set-name: ib7
+      mtu: 2044
+      addresses:
+        - 10.42.107.10/24
+
+  bonds:
+    bond0:
+      interfaces:
+        - nsa
+        - nsb
+      mtu: 9000
+      parameters:
+        mode: 802.3ad
+        lacp-rate: fast
+        transmit-hash-policy: layer3+4
+
+  vlans:
+    bond0.100:
+      id: 100
+      link: bond0
+      mtu: 1500
+      addresses:
+        - 10.42.10.30/24
+      routes:
+        - to: default
+          via: 10.42.10.1
+    bond0.200:
+      id: 200
+      link: bond0
+      mtu: 9000
+      addresses:
+        - 10.42.20.30/24
+    bond0.300:
+      id: 300
+      link: bond0
+      mtu: 1500
+      addresses:
+        - 10.42.30.30/24

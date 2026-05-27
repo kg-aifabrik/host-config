@@ -85,6 +85,36 @@ class TestLoadFixture:
             assert i.custom_fields["sriov_vfs"] == 0
 
     @pytest.mark.fast
+    def test_real_b200_host_fixture_loads(self) -> None:
+        """The committed b200-host.yaml loads with all 10 NICs (RoCE, like b300)."""
+        path = Path(__file__).parent.parent.parent.parent / "fixtures/netbox/data/b200-host.yaml"
+        fx = load_fixture(path)
+        assert fx.asset_tag == "SN-GPU-B200-001"
+        assert fx.device_role == "gpu-b200"
+        physical = [i for i in fx.interfaces if i.mac]
+        assert len(physical) == 10  # 2 N-S + 8 E-W RoCE
+        ew = [i for i in fx.interfaces if i.name.startswith("gpu")]
+        assert len(ew) == 8
+        assert all(i.custom_fields["sriov_vfs"] == 0 for i in ew)
+
+    @pytest.mark.fast
+    def test_real_h200_host_fixture_loads(self) -> None:
+        """The committed h200-host.yaml loads with 8 InfiniBand (ib*) underlays."""
+        path = Path(__file__).parent.parent.parent.parent / "fixtures/netbox/data/h200-host.yaml"
+        fx = load_fixture(path)
+        assert fx.asset_tag == "SN-GPU-H200-001"
+        assert fx.device_role == "gpu-h200"
+        physical = [i for i in fx.interfaces if i.mac]
+        assert len(physical) == 10  # 2 N-S + 8 E-W InfiniBand
+        ib = [i for i in fx.interfaces if i.name.startswith("ib")]
+        assert len(ib) == 8
+        # IPoIB datagram MTU; InfiniBand interface type; no RoCE/SR-IOV fields.
+        for i in ib:
+            assert i.mtu == 2044
+            assert i.type == "infiniband-ndr"
+            assert "sriov_vfs" not in i.custom_fields
+
+    @pytest.mark.fast
     def test_missing_file_raises(self, tmp_path: Path) -> None:
         """Loading a non-existent file raises FixtureLoadError."""
         path = tmp_path / "nonexistent.yaml"

@@ -1,0 +1,80 @@
+{# network-config — Netplan v2, gpu-h200 role (InfiniBand backend).
+
+Differs from the RoCE roles (gpu-b300 / gpu-b200):
+  - The 8 east-west NICs are InfiniBand HCA ports configured as IPoIB
+    (ib0..ib7), one /24 per rail. MTU 2044 is the IPoIB datagram-mode
+    default (connected mode can go higher, but is left out-of-band).
+  - No `virtual-function-count`: InfiniBand RDMA is native to the HCA;
+    there is no Soft-RoCE substrate and no Netplan-driven SR-IOV here.
+  - IPoIB rails are NOT bonded — multi-rail collectives are handled by
+    NCCL/UCX over the fabric, not by LACP.
+
+WHY IPoIB sits under `ethernets:` — Netplan v2 has no first-class
+`infinibands` key; networkd assigns IP to an IPoIB link the same way it
+does an Ethernet link, so the `ethernets:` stanza is the supported path.
+
+WHY match-by-macaddress on ib* is a placeholder — real ConnectX IPoIB
+ports present a 20-byte hardware address / port GUID, not a 6-byte MAC.
+The match is kept uniform with the Ethernet NICs for templating; on real
+hardware substitute `match: {name: "ibp*s0"}` or a GUID-keyed udev/.link
+rule. See docs/adr/0013-gpu-h200-infiniband-role.md.
+#}
+network:
+  version: 2
+  renderer: networkd
+
+  ethernets:
+{% for nic in ns_nics %}
+    {{ nic.name }}:
+      match:
+        macaddress: {{ nic.mac }}
+      set-name: {{ nic.name }}
+      mtu: {{ nic.mtu }}
+{% endfor %}
+{% for nic in ib_underlays %}
+    {{ nic.name }}:
+      match:
+        macaddress: {{ nic.mac }}
+      set-name: {{ nic.name }}
+      mtu: {{ nic.mtu }}
+      addresses:
+        - {{ nic.address }}
+{% endfor %}
+
+  bonds:
+    {{ bond.name }}:
+      interfaces:
+{% for member in bond.members %}
+        - {{ member }}
+{% endfor %}
+      mtu: {{ bond.mtu }}
+      parameters:
+        mode: {{ bond.mode }}
+        lacp-rate: {{ bond.lacp_rate }}
+        transmit-hash-policy: {{ bond.transmit_hash_policy }}
+
+  vlans:
+{% for vlan in vlans %}
+    {{ vlan.name }}:
+      id: {{ vlan.vlan_id }}
+      link: {{ vlan.parent }}
+      mtu: {{ vlan.mtu }}
+      addresses:
+        - {{ vlan.address }}
+{% if vlan.gateway is not none %}
+      routes:
+        - to: default
+          via: {{ vlan.gateway }}
+{% endif %}
+{% if vlan.dns %}
+      nameservers:
+        addresses:
+{% for ns in vlan.dns %}
+          - {{ ns }}
+{% endfor %}
+{% if vlan.search_domain is not none %}
+        search:
+          - {{ vlan.search_domain }}
+{% endif %}
+{% endif %}
+{% endfor %}

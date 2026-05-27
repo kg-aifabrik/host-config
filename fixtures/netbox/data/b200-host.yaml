@@ -1,0 +1,160 @@
+# B200 GPU host fixture — the gpu-b200 role.
+#
+# Topologically identical to the gpu-b300 fixture (2 N-S + 8 east-west RoCE
+# underlays); a distinct role/device-type so the renderer can diverge later
+# without disturbing b300. Distinct MACs/IPs from b300 so both can coexist
+# in one Netbox.
+#
+# sriov_vfs is 0 (lab-safe: QEMU virtio-net-pci has no SR-IOV; a non-zero
+# virtual-function-count blocks netplan from bringing up bond0/VLANs). Keep
+# in lock-step with make_b200_intent() in tests/unit/models/test_intent.py.
+
+asset_tag: SN-GPU-B200-001
+hostname: gpu-b200-01.pod07.site03.internal
+device_role: gpu-b200
+site: site03
+
+device_type:
+  manufacturer: NVIDIA
+  model: HGX B200
+  slug: hgx-b200
+  u_height: 8
+
+device_custom_fields:
+  bf3_mode: nic
+
+vlans:
+  - vid: 100
+    name: mgmt
+  - vid: 200
+    name: storage
+  - vid: 300
+    name: ingress
+
+interfaces:
+  # --- N-S NICs (BlueField-3 DPU pair) ---
+  - name: nsa
+    type: 200gbase-x-qsfp56
+    mac: aa:bb:cc:00:03:01
+    mtu: 9000
+
+  - name: nsb
+    type: 200gbase-x-qsfp56
+    mac: aa:bb:cc:00:03:02
+    mtu: 9000
+
+  # --- LACP bond + VLAN trunk ---
+  - name: bond0
+    type: lag
+    mtu: 9000
+    lag_members: [nsa, nsb]
+
+  - name: bond0.100
+    type: virtual
+    mtu: 1500
+    parent: bond0
+    untagged_vlan: 100
+    ip: 10.42.10.24/24
+
+  - name: bond0.200
+    type: virtual
+    mtu: 9000
+    parent: bond0
+    untagged_vlan: 200
+    ip: 10.42.20.24/24
+
+  - name: bond0.300
+    type: virtual
+    mtu: 1500
+    parent: bond0
+    untagged_vlan: 300
+    ip: 10.42.30.24/24
+
+  # --- East-west RoCE underlay (8x ConnectX) ---
+  - name: gpu0
+    type: 400gbase-x-qsfpdd
+    mac: aa:bb:cc:00:03:10
+    mtu: 9000
+    ip: 10.42.100.24/24
+    custom_fields:
+      roce_tc: 3
+      numa_node: 0
+      sriov_vfs: 0
+      gpu_affinity: GPU0
+
+  - name: gpu1
+    type: 400gbase-x-qsfpdd
+    mac: aa:bb:cc:00:03:11
+    mtu: 9000
+    ip: 10.42.101.24/24
+    custom_fields:
+      roce_tc: 3
+      numa_node: 0
+      sriov_vfs: 0
+      gpu_affinity: GPU1
+
+  - name: gpu2
+    type: 400gbase-x-qsfpdd
+    mac: aa:bb:cc:00:03:12
+    mtu: 9000
+    ip: 10.42.102.24/24
+    custom_fields:
+      roce_tc: 3
+      numa_node: 0
+      sriov_vfs: 0
+      gpu_affinity: GPU2
+
+  - name: gpu3
+    type: 400gbase-x-qsfpdd
+    mac: aa:bb:cc:00:03:13
+    mtu: 9000
+    ip: 10.42.103.24/24
+    custom_fields:
+      roce_tc: 3
+      numa_node: 0
+      sriov_vfs: 0
+      gpu_affinity: GPU3
+
+  - name: gpu4
+    type: 400gbase-x-qsfpdd
+    mac: aa:bb:cc:00:03:14
+    mtu: 9000
+    ip: 10.42.104.24/24
+    custom_fields:
+      roce_tc: 3
+      numa_node: 1
+      sriov_vfs: 0
+      gpu_affinity: GPU4
+
+  - name: gpu5
+    type: 400gbase-x-qsfpdd
+    mac: aa:bb:cc:00:03:15
+    mtu: 9000
+    ip: 10.42.105.24/24
+    custom_fields:
+      roce_tc: 3
+      numa_node: 1
+      sriov_vfs: 0
+      gpu_affinity: GPU5
+
+  - name: gpu6
+    type: 400gbase-x-qsfpdd
+    mac: aa:bb:cc:00:03:16
+    mtu: 9000
+    ip: 10.42.106.24/24
+    custom_fields:
+      roce_tc: 3
+      numa_node: 1
+      sriov_vfs: 0
+      gpu_affinity: GPU6
+
+  - name: gpu7
+    type: 400gbase-x-qsfpdd
+    mac: aa:bb:cc:00:03:17
+    mtu: 9000
+    ip: 10.42.107.24/24
+    custom_fields:
+      roce_tc: 3
+      numa_node: 1
+      sriov_vfs: 0
+      gpu_affinity: GPU7

@@ -1,0 +1,196 @@
+#cloud-config
+hostname: gpu-b200-01.pod07.site03.internal
+fqdn: gpu-b200-01.pod07.site03.internal
+manage_etc_hosts: true
+preserve_hostname: false
+
+write_files:
+  - path: /etc/security/limits.d/rdma.conf
+    owner: root:root
+    permissions: "0644"
+    content: |
+      # Unlimited locked memory for RDMA / Soft-RoCE (rdma_rxe).
+      # Required for ibv_reg_mr to succeed with large buffers.
+      * hard memlock unlimited
+      * soft memlock unlimited
+
+  - path: /etc/netplan/60-lab.yaml
+    permissions: '0600'
+    owner: root:root
+    content: |
+      network:
+        version: 2
+        renderer: networkd
+        ethernets:
+          nsa:
+            match:
+              macaddress: aa:bb:cc:00:03:01
+            set-name: nsa
+            mtu: 9000
+          nsb:
+            match:
+              macaddress: aa:bb:cc:00:03:02
+            set-name: nsb
+            mtu: 9000
+          gpu0:
+            match:
+              macaddress: aa:bb:cc:00:03:10
+            set-name: gpu0
+            mtu: 9000
+            addresses:
+              - 10.42.100.24/24
+            virtual-function-count: 0
+          gpu1:
+            match:
+              macaddress: aa:bb:cc:00:03:11
+            set-name: gpu1
+            mtu: 9000
+            addresses:
+              - 10.42.101.24/24
+            virtual-function-count: 0
+          gpu2:
+            match:
+              macaddress: aa:bb:cc:00:03:12
+            set-name: gpu2
+            mtu: 9000
+            addresses:
+              - 10.42.102.24/24
+            virtual-function-count: 0
+          gpu3:
+            match:
+              macaddress: aa:bb:cc:00:03:13
+            set-name: gpu3
+            mtu: 9000
+            addresses:
+              - 10.42.103.24/24
+            virtual-function-count: 0
+          gpu4:
+            match:
+              macaddress: aa:bb:cc:00:03:14
+            set-name: gpu4
+            mtu: 9000
+            addresses:
+              - 10.42.104.24/24
+            virtual-function-count: 0
+          gpu5:
+            match:
+              macaddress: aa:bb:cc:00:03:15
+            set-name: gpu5
+            mtu: 9000
+            addresses:
+              - 10.42.105.24/24
+            virtual-function-count: 0
+          gpu6:
+            match:
+              macaddress: aa:bb:cc:00:03:16
+            set-name: gpu6
+            mtu: 9000
+            addresses:
+              - 10.42.106.24/24
+            virtual-function-count: 0
+          gpu7:
+            match:
+              macaddress: aa:bb:cc:00:03:17
+            set-name: gpu7
+            mtu: 9000
+            addresses:
+              - 10.42.107.24/24
+            virtual-function-count: 0
+        bonds:
+          bond0:
+            interfaces:
+              - nsa
+              - nsb
+            mtu: 9000
+            parameters:
+              mode: 802.3ad
+              lacp-rate: fast
+              transmit-hash-policy: layer3+4
+        vlans:
+          bond0.100:
+            id: 100
+            link: bond0
+            mtu: 1500
+            addresses:
+              - 10.42.10.24/24
+            routes:
+              - to: default
+                via: 10.42.10.1
+          bond0.200:
+            id: 200
+            link: bond0
+            mtu: 9000
+            addresses:
+              - 10.42.20.24/24
+          bond0.300:
+            id: 300
+            link: bond0
+            mtu: 1500
+            addresses:
+              - 10.42.30.24/24
+
+runcmd:
+  # Install Soft-RoCE userland + extra kernel modules FIRST, BEFORE applying
+  # the lab Netplan config. Reason: the lab Netplan adds a default route via
+  # the bond0.100 gateway (10.42.10.1) which doesn't exist in the lab. Once
+  # netplan apply replaces the SLIRP DHCP default route with that broken
+  # route, apt can no longer reach archive.ubuntu.com. Doing apt first uses
+  # the SLIRP DHCP default route which works.
+  #
+  # Enable universe in Ubuntu 24.04's deb822-style sources file so apt can
+  # find ibverbs-utils / rdmacm-utils.
+  - >-
+    sed -i 's/^Components: main.*$/Components: main universe/'
+    /etc/apt/sources.list.d/ubuntu.sources
+  # Force IPv4 — QEMU SLIRP (user-mode networking) does not support IPv6.
+  # linux-modules-extra-$(uname -r) ships rdma_rxe (Soft-RoCE driver, MAIN).
+  # ibverbs-utils ships ibv_devinfo (B300 e2e asserts 8 rxe devices).
+  # rdma-core ships the `rdma` CLI used to create rxe devices below.
+  # rdmacm-utils ships `rping` (B300 e2e proves RDMA verbs end-to-end).
+  - DEBIAN_FRONTEND=noninteractive apt-get -o Acquire::ForceIPv4=true update
+  - >-
+    DEBIAN_FRONTEND=noninteractive apt-get -o Acquire::ForceIPv4=true install -y
+    "linux-modules-extra-$(uname -r)" ibverbs-utils rdma-core rdmacm-utils
+  # NOW apply the Netplan network config so gpu[0..7] interfaces exist
+  # under their final names before rdma link add references them.
+  - netplan apply
+  # Poll for bond0 to be created by networkd. `networkctl wait-online`
+  # accepts neither --interface= nor --timeout= in systemd 255 (Ubuntu
+  # 24.04), so use a sh polling loop instead. `timeout 60` caps total wait
+  # at 60s — bond0 normally appears in <10s once networkd processes the
+  # bond .netdev file.
+  - timeout 60 sh -c 'until ip link show bond0 >/dev/null 2>&1; do sleep 1; done' || true
+  # Load the Soft-RoCE kernel module.
+  # || true: rdma_rxe install may still fail in offline environments;
+  # treat a missing module as non-fatal so cloud-init does not exit 1
+  # and block every other test. The rdma e2e tests will fail with a
+  # clear assertion in that case.
+  - modprobe rdma_rxe || true
+  # Create one rxe device per east-west NIC, skipping if already present.
+  # || true: if rdma_rxe is not loaded, rdma link add exits 1 ("Invalid
+  # argument"). Keep it non-fatal for the same reason as modprobe above.
+  # Names match the gpu-b200 network-config (gpu0..gpu7 after Netplan renames).
+  - >-
+    rdma link show rxe_gpu0 > /dev/null 2>&1 ||
+    rdma link add rxe_gpu0 type rxe netdev gpu0 || true
+  - >-
+    rdma link show rxe_gpu1 > /dev/null 2>&1 ||
+    rdma link add rxe_gpu1 type rxe netdev gpu1 || true
+  - >-
+    rdma link show rxe_gpu2 > /dev/null 2>&1 ||
+    rdma link add rxe_gpu2 type rxe netdev gpu2 || true
+  - >-
+    rdma link show rxe_gpu3 > /dev/null 2>&1 ||
+    rdma link add rxe_gpu3 type rxe netdev gpu3 || true
+  - >-
+    rdma link show rxe_gpu4 > /dev/null 2>&1 ||
+    rdma link add rxe_gpu4 type rxe netdev gpu4 || true
+  - >-
+    rdma link show rxe_gpu5 > /dev/null 2>&1 ||
+    rdma link add rxe_gpu5 type rxe netdev gpu5 || true
+  - >-
+    rdma link show rxe_gpu6 > /dev/null 2>&1 ||
+    rdma link add rxe_gpu6 type rxe netdev gpu6 || true
+  - >-
+    rdma link show rxe_gpu7 > /dev/null 2>&1 ||
+    rdma link add rxe_gpu7 type rxe netdev gpu7 || true

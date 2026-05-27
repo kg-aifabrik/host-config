@@ -78,6 +78,7 @@ def _canonicalize(intent: HostIntent) -> dict[str, Any]:
     ctx["ns_nics"] = sorted(ctx["ns_nics"], key=lambda n: n["name"])
     ctx["vlans"] = sorted(ctx["vlans"], key=lambda v: v["vlan_id"])
     ctx["roce_underlays"] = sorted(ctx["roce_underlays"], key=lambda n: n["name"])
+    ctx["ib_underlays"] = sorted(ctx["ib_underlays"], key=lambda n: n["name"])
     # Bond.members is a list of strings — sorting keeps the emitted
     # `interfaces:` array stable even if upstream order shifts.
     ctx["bond"]["members"] = sorted(ctx["bond"]["members"])

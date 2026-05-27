@@ -9,6 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Two GPU roles — `gpu-b200` and `gpu-h200` (ADR-0013). `gpu-b200` mirrors
+  `gpu-b300` (8 RoCE-over-Ethernet underlays, Soft-RoCE in the lab) as a
+  distinct role/template tree so the B-series platforms can diverge later.
+  `gpu-h200` is the first **InfiniBand** role: a new `InfinibandUnderlay`
+  model + `ib_underlays` field carry 8 IPoIB rails (ib0..ib7, MTU 2044, one
+  /24 each); the gpu-h200 template loads the IB stack (mlx5_ib/ib_ipoib/…)
+  instead of `rdma_rxe`, emits no Netplan `virtual-function-count` (native
+  HCA RDMA), and never bonds the rails. New `check_ib_count_for_role` +
+  generalized `check_roce_count_for_role` enforce the per-role east-west
+  split (RoCE roles → 8 RoCE/0 IB; gpu-h200 → 8 IB/0 RoCE; cpu → neither).
+  Loader gains `_build_ib_underlays` (ib0..ib7 → IPoIB). New goldens,
+  Netbox fixtures (`b200-host.yaml`, `h200-host.yaml`), intent factories,
+  and unit coverage (model invariants, loader mapping, template structure,
+  golden byte-equality) for both roles; 287 unit tests, ruff + mypy clean.
+- `docs/artifacts/h200-infiniband-sample/` — hand-authored H200 + InfiniBand
+  cloud-init seed (user-data / network-config / meta-data) with placeholder
+  MACs, for quick test provisioning without the Netbox → renderer pipeline.
+
 - **Lab e2e bring-up on DigitalOcean — full suite green (23/23).** Brought the
   B300 RDMA e2e suite from 0/11 to 11/11 (and kept CPU at 12/12) on a real DO
   Droplet, then proved the whole path is hands-off from a cold start. Captured

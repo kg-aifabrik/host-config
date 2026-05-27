@@ -200,6 +200,69 @@ def _build_b300_mock_client() -> MagicMock:
     return client
 
 
+def _build_h200_mock_client() -> MagicMock:
+    """Build a mock client representing a fully-populated gpu-h200 host.
+
+    Mirrors `fixtures/netbox/data/h200-host.yaml`: same N-S + bond + VLAN
+    shape, plus 8 east-west InfiniBand IPoIB underlays (ib0..ib7) instead
+    of RoCE NICs. Exercises the loader's `_build_ib_underlays` path.
+    """
+    client = _build_cpu_mock_client()
+    device = MagicMock()
+    device.id = 3
+    device.name = "gpu-h200-01"
+    device.role.slug = "gpu-h200"
+    device.custom_fields = {"bf3_mode": "nic"}
+    client.dcim.devices.get.return_value = device
+
+    ns_and_bond = [
+        _make_interface(iface_id=10, name="nsa", mac="aa:bb:cc:00:02:01", mtu=9000),
+        _make_interface(iface_id=11, name="nsb", mac="aa:bb:cc:00:02:02", mtu=9000),
+        _make_interface(iface_id=12, name="bond0", mtu=9000),
+        _make_interface(
+            iface_id=13, name="bond0.100", mtu=1500,
+            untagged_vlan_vid=100, untagged_vlan_name="mgmt",
+        ),
+        _make_interface(
+            iface_id=14, name="bond0.200", mtu=9000,
+            untagged_vlan_vid=200, untagged_vlan_name="storage",
+        ),
+        _make_interface(
+            iface_id=15, name="bond0.300", mtu=1500,
+            untagged_vlan_vid=300, untagged_vlan_name="ingress",
+        ),
+    ]
+    ib_ifaces = [
+        _make_interface(
+            iface_id=30 + i,
+            name=f"ib{i}",
+            mac=f"aa:bb:cc:00:0e:{i:02x}",
+            mtu=2044,
+            custom_fields={"numa_node": 0 if i < 4 else 1, "gpu_affinity": f"GPU{i}"},
+        )
+        for i in range(8)
+    ]
+    client.dcim.interfaces.filter.return_value = ns_and_bond + ib_ifaces
+
+    ip_by_iface_id = {
+        13: "10.42.10.30/24",
+        14: "10.42.20.30/24",
+        15: "10.42.30.30/24",
+        **{30 + i: f"10.42.{100 + i}.10/24" for i in range(8)},
+    }
+
+    def _ip_filter(*, interface_id: int) -> list[MagicMock]:
+        ip = ip_by_iface_id.get(interface_id)
+        if not ip:
+            return []
+        rec = MagicMock()
+        rec.address = ip
+        return [rec]
+
+    client.ipam.ip_addresses.filter.side_effect = _ip_filter
+    return client
+
+
 # ---------------------------------------------------------------------------
 # Happy paths
 # ---------------------------------------------------------------------------
@@ -261,6 +324,20 @@ class TestHappyPaths:
         for i, underlay in enumerate(intent.roce_underlays):
             assert underlay.address == IPv4Interface(f"10.42.{100 + i}.23/24")
             assert underlay.sriov_vfs == 16
+
+    @pytest.mark.fast
+    def test_h200_host_maps_to_intent(self) -> None:
+        """A gpu-h200 host maps to a HostIntent with 8 InfiniBand underlays, no RoCE."""
+        intent = load_host_intent(_build_h200_mock_client(), "SN-GPU-H200-001")
+
+        assert intent.role is Role.GPU_H200
+        assert intent.roce_underlays == []
+        assert len(intent.ib_underlays) == 8
+        # Underlays sorted by name → ib0..ib7 ordering is deterministic.
+        assert [u.name for u in intent.ib_underlays] == [f"ib{i}" for i in range(8)]
+        for i, underlay in enumerate(intent.ib_underlays):
+            assert underlay.address == IPv4Interface(f"10.42.{100 + i}.10/24")
+            assert underlay.mtu == 2044
 
 
 # ---------------------------------------------------------------------------

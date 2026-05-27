@@ -5,10 +5,13 @@ host whose backend compute fabric is **InfiniBand (NDR)**, not the
 RoCE-over-Ethernet the `gpu-b300` role uses. Drop-in for a cloud-init
 NoCloud datasource; all MACs/IPs are **placeholders** to substitute.
 
-> Not produced by the renderer. The FastAPI renderer only knows the `cpu`
-> and `gpu-b300` roles today; this is a standalone reference seed. Wiring a
-> `gpu-h200` role through the renderer (model + template + loader + goldens)
-> is the "full renderer support" follow-on, not done here.
+> The renderer now supports a `gpu-h200` role natively (see
+> [ADR-0013](../../adr/0013-gpu-h200-infiniband-role.md)) — it emits an
+> equivalent seed from a Netbox-backed `HostIntent`
+> (`fixtures/netbox/data/h200-host.yaml`). This hand-authored sample is kept
+> as a standalone, self-documenting reference (placeholders, IB caveats, and
+> the `cloud-localds` recipe) for quick test provisioning without the full
+> Netbox → renderer pipeline.
 
 ## Files
 

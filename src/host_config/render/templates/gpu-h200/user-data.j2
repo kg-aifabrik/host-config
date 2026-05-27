@@ -1,0 +1,152 @@
+#cloud-config
+{# user-data — gpu-h200 boot identity + network config + InfiniBand bring-up.
+
+The east-west fabric is InfiniBand (NDR), not RoCE-over-Ethernet. Key
+differences from the gpu-b300 / gpu-b200 (RoCE) roles:
+
+WHY no rdma_rxe: InfiniBand HCAs (ConnectX-7/8) do RDMA natively in
+hardware. Soft-RoCE (rdma_rxe) is a *lab substitute* for Ethernet hosts
+that lack RDMA NICs; an InfiniBand host has no use for it. Instead we load
+the IB stack (mlx5_ib + ib_ipoib + management modules).
+
+WHY IPoIB: the ib0..ib7 interfaces carry IP for bootstrap/control; bulk
+collective traffic uses native RDMA verbs and bypasses the IP stack. MTU
+2044 is the IPoIB datagram-mode default.
+
+WHY memlock unlimited: RDMA registration pins memory; the default 64 KB
+limit is far too low. Standard practice for any RDMA workload.
+
+WHY keeping GPU-specific packages out of user-data: NVIDIA driver, DOCA /
+MLNX_OFED, and fabricmanager version-pin to the GPU/HCA firmware; they are
+installed by a post-boot Ansible run, keeping this template byte-stable.
+
+WHY write_files + runcmd for network-config: cloud-init 25.x (Ubuntu 24.04)
+never fetches "network-config" from HTTP NoCloud seeds, so we deliver the
+Netplan YAML via write_files and apply it in runcmd.
+#}
+hostname: {{ hostname }}
+fqdn: {{ hostname }}
+manage_etc_hosts: true
+preserve_hostname: false
+
+write_files:
+  - path: /etc/security/limits.d/rdma.conf
+    owner: root:root
+    permissions: "0644"
+    content: |
+      # Unlimited locked memory for InfiniBand / RDMA verbs.
+      # Required for ibv_reg_mr to succeed with large buffers.
+      * hard memlock unlimited
+      * soft memlock unlimited
+
+  {# Load the InfiniBand + IPoIB stack at every boot. ib_ipoib creates the
+     ib* interfaces the Netplan config below configures. #}
+  - path: /etc/modules-load.d/infiniband.conf
+    owner: root:root
+    permissions: "0644"
+    content: |
+      mlx5_ib
+      ib_umad
+      ib_uverbs
+      rdma_ucm
+      ib_ipoib
+
+  {# Netplan v2 config delivered via write_files because cloud-init's HTTP
+     NoCloud seed reader never fetches network-config from HTTP seeds. The
+     file is written at 0600 to satisfy netplan's strict permissions check. #}
+  - path: /etc/netplan/60-lab.yaml
+    permissions: '0600'
+    owner: root:root
+    content: |
+      network:
+        version: 2
+        renderer: networkd
+        ethernets:
+{% for nic in ns_nics %}
+          {{ nic.name }}:
+            match:
+              macaddress: {{ nic.mac }}
+            set-name: {{ nic.name }}
+            mtu: {{ nic.mtu }}
+{% endfor %}
+{% for nic in ib_underlays %}
+          {{ nic.name }}:
+            match:
+              macaddress: {{ nic.mac }}
+            set-name: {{ nic.name }}
+            mtu: {{ nic.mtu }}
+            addresses:
+              - {{ nic.address }}
+{% endfor %}
+        bonds:
+          {{ bond.name }}:
+            interfaces:
+{% for member in bond.members %}
+              - {{ member }}
+{% endfor %}
+            mtu: {{ bond.mtu }}
+            parameters:
+              mode: {{ bond.mode }}
+              lacp-rate: {{ bond.lacp_rate }}
+              transmit-hash-policy: {{ bond.transmit_hash_policy }}
+        vlans:
+{% for vlan in vlans %}
+          {{ vlan.name }}:
+            id: {{ vlan.vlan_id }}
+            link: {{ vlan.parent }}
+            mtu: {{ vlan.mtu }}
+            addresses:
+              - {{ vlan.address }}
+{% if vlan.gateway is not none %}
+            routes:
+              - to: default
+                via: {{ vlan.gateway }}
+{% endif %}
+{% if vlan.dns %}
+            nameservers:
+              addresses:
+{% for ns in vlan.dns %}
+                - {{ ns }}
+{% endfor %}
+{% if vlan.search_domain is not none %}
+              search:
+                - {{ vlan.search_domain }}
+{% endif %}
+{% endif %}
+{% endfor %}
+
+runcmd:
+  # Install the InfiniBand userland + extra kernel modules FIRST, BEFORE
+  # applying the lab Netplan config. Reason: the lab Netplan adds a default
+  # route via the bond0.100 gateway (10.42.10.1) which doesn't exist in the
+  # lab; once netplan apply replaces the provisioning DHCP default route with
+  # that broken route, apt can no longer reach the archive. Doing apt first
+  # keeps the working default route. (Same lesson as the RoCE roles.)
+  #
+  # On real H200 nodes the Mellanox stack comes from DOCA-OFED / MLNX_OFED,
+  # which supersedes these inbox packages; this inbox path is for a generic
+  # Ubuntu image. linux-modules-extra carries ib_ipoib / mlx5_ib for the
+  # stock kernel; rdma-core + ibverbs-utils + infiniband-diags provide
+  # ibstat / ibv_devinfo / ibping. universe is enabled for ibverbs-utils /
+  # infiniband-diags; ForceIPv4 for v4-only provisioning NATs.
+  - >-
+    sed -i 's/^Components: main.*$/Components: main universe/'
+    /etc/apt/sources.list.d/ubuntu.sources
+  - DEBIAN_FRONTEND=noninteractive apt-get -o Acquire::ForceIPv4=true update
+  - >-
+    DEBIAN_FRONTEND=noninteractive apt-get -o Acquire::ForceIPv4=true install -y
+    "linux-modules-extra-$(uname -r)" rdma-core ibverbs-utils ibverbs-providers
+    infiniband-diags
+  # Load the IB stack now so the ib* interfaces exist before netplan renames
+  # them. || true: a missing module on a non-IB box is non-fatal — the host
+  # still boots; the IPoIB interfaces simply won't appear.
+  - modprobe mlx5_ib || true
+  - modprobe ib_umad || true
+  - modprobe ib_uverbs || true
+  - modprobe rdma_ucm || true
+  - modprobe ib_ipoib || true
+  # Apply the network config now that packages + modules are in place.
+  - netplan apply
+  # Best-effort wait for the first IPoIB rail (cap 60s). Harmless on a box
+  # with no real IB HCA — the loop just times out.
+  - timeout 60 sh -c 'until ip link show ib0 >/dev/null 2>&1; do sleep 1; done' || true

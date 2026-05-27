@@ -1,0 +1,160 @@
+#cloud-config
+{# user-data — gpu-b200 boot identity + network config + Soft-RoCE bring-up.
+
+Soft-RoCE (rdma_rxe) is the RDMA substrate for the lab harness. It
+emulates RDMA verbs over standard Ethernet so we can run RDMA verb
+tests without physical CX-8 / BlueField-3 hardware.
+
+WHY rdma_rxe + rxe devices: The real B300 uses hardware RDMA via
+ConnectX-8 NICs. In the lab we substitute Soft-RoCE (kernel module
+rdma_rxe) and create one rxe_* device per gpu[0..7] NIC. NCCL and
+ibverbs tooling is happy to use rdma_rxe devices without modification.
+
+WHY memlock unlimited: RDMA registration pins memory; the kernel
+enforces a per-process memlock limit. The default (64 KB) is too low
+for any meaningful RDMA buffer. Setting it to unlimited at the system
+level (via /etc/security/limits.d/rdma.conf) is the standard practice
+for RDMA workloads.
+
+WHY runcmd idempotency: `rdma link add` fails if the device already
+exists (exit 1). We check existence first so a re-run or re-image does
+not fail the cloud-init runcmd phase.
+
+WHY keeping GPU-specific packages out of user-data: NVIDIA driver,
+MOFED, and fabricmanager version-pin to the GPU firmware. They are
+installed by a post-boot Ansible run, not here, so this template stays
+byte-stable across driver-version churn.
+
+WHY write_files + runcmd for network-config:
+Cloud-init 25.x (Ubuntu 24.04) does not fetch "network-config" from HTTP
+NoCloud seeds. util.read_seeded() always returns network=None for HTTP
+seeds, so cloud-init falls back to DHCP-only. Delivering the Netplan YAML
+via write_files and applying it in runcmd (before rdma_rxe) guarantees the
+gpu[0..7] interfaces exist under their final names when rdma link add runs.
+#}
+hostname: {{ hostname }}
+fqdn: {{ hostname }}
+manage_etc_hosts: true
+preserve_hostname: false
+
+write_files:
+  - path: /etc/security/limits.d/rdma.conf
+    owner: root:root
+    permissions: "0644"
+    content: |
+      # Unlimited locked memory for RDMA / Soft-RoCE (rdma_rxe).
+      # Required for ibv_reg_mr to succeed with large buffers.
+      * hard memlock unlimited
+      * soft memlock unlimited
+
+  {# Netplan v2 config delivered via write_files because cloud-init's HTTP
+     NoCloud seed reader never fetches network-config from HTTP seeds. The
+     file is written at 0600 to satisfy netplan's strict permissions check. #}
+  - path: /etc/netplan/60-lab.yaml
+    permissions: '0600'
+    owner: root:root
+    content: |
+      network:
+        version: 2
+        renderer: networkd
+        ethernets:
+{% for nic in ns_nics %}
+          {{ nic.name }}:
+            match:
+              macaddress: {{ nic.mac }}
+            set-name: {{ nic.name }}
+            mtu: {{ nic.mtu }}
+{% endfor %}
+{% for nic in roce_underlays %}
+          {{ nic.name }}:
+            match:
+              macaddress: {{ nic.mac }}
+            set-name: {{ nic.name }}
+            mtu: {{ nic.mtu }}
+            addresses:
+              - {{ nic.address }}
+            virtual-function-count: {{ nic.sriov_vfs }}
+{% endfor %}
+        bonds:
+          {{ bond.name }}:
+            interfaces:
+{% for member in bond.members %}
+              - {{ member }}
+{% endfor %}
+            mtu: {{ bond.mtu }}
+            parameters:
+              mode: {{ bond.mode }}
+              lacp-rate: {{ bond.lacp_rate }}
+              transmit-hash-policy: {{ bond.transmit_hash_policy }}
+        vlans:
+{% for vlan in vlans %}
+          {{ vlan.name }}:
+            id: {{ vlan.vlan_id }}
+            link: {{ vlan.parent }}
+            mtu: {{ vlan.mtu }}
+            addresses:
+              - {{ vlan.address }}
+{% if vlan.gateway is not none %}
+            routes:
+              - to: default
+                via: {{ vlan.gateway }}
+{% endif %}
+{% if vlan.dns %}
+            nameservers:
+              addresses:
+{% for ns in vlan.dns %}
+                - {{ ns }}
+{% endfor %}
+{% if vlan.search_domain is not none %}
+              search:
+                - {{ vlan.search_domain }}
+{% endif %}
+{% endif %}
+{% endfor %}
+
+runcmd:
+  # Install Soft-RoCE userland + extra kernel modules FIRST, BEFORE applying
+  # the lab Netplan config. Reason: the lab Netplan adds a default route via
+  # the bond0.100 gateway (10.42.10.1) which doesn't exist in the lab. Once
+  # netplan apply replaces the SLIRP DHCP default route with that broken
+  # route, apt can no longer reach archive.ubuntu.com. Doing apt first uses
+  # the SLIRP DHCP default route which works.
+  #
+  # Enable universe in Ubuntu 24.04's deb822-style sources file so apt can
+  # find ibverbs-utils / rdmacm-utils.
+  - >-
+    sed -i 's/^Components: main.*$/Components: main universe/'
+    /etc/apt/sources.list.d/ubuntu.sources
+  # Force IPv4 — QEMU SLIRP (user-mode networking) does not support IPv6.
+  # linux-modules-extra-$(uname -r) ships rdma_rxe (Soft-RoCE driver, MAIN).
+  # ibverbs-utils ships ibv_devinfo (B300 e2e asserts 8 rxe devices).
+  # rdma-core ships the `rdma` CLI used to create rxe devices below.
+  # rdmacm-utils ships `rping` (B300 e2e proves RDMA verbs end-to-end).
+  - DEBIAN_FRONTEND=noninteractive apt-get -o Acquire::ForceIPv4=true update
+  - >-
+    DEBIAN_FRONTEND=noninteractive apt-get -o Acquire::ForceIPv4=true install -y
+    "linux-modules-extra-$(uname -r)" ibverbs-utils rdma-core rdmacm-utils
+  # NOW apply the Netplan network config so gpu[0..7] interfaces exist
+  # under their final names before rdma link add references them.
+  - netplan apply
+  # Poll for bond0 to be created by networkd. `networkctl wait-online`
+  # accepts neither --interface= nor --timeout= in systemd 255 (Ubuntu
+  # 24.04), so use a sh polling loop instead. `timeout 60` caps total wait
+  # at 60s — bond0 normally appears in <10s once networkd processes the
+  # bond .netdev file.
+  - timeout 60 sh -c 'until ip link show bond0 >/dev/null 2>&1; do sleep 1; done' || true
+  # Load the Soft-RoCE kernel module.
+  # || true: rdma_rxe install may still fail in offline environments;
+  # treat a missing module as non-fatal so cloud-init does not exit 1
+  # and block every other test. The rdma e2e tests will fail with a
+  # clear assertion in that case.
+  - modprobe rdma_rxe || true
+  # Create one rxe device per east-west NIC, skipping if already present.
+  # || true: if rdma_rxe is not loaded, rdma link add exits 1 ("Invalid
+  # argument"). Keep it non-fatal for the same reason as modprobe above.
+  # Names match the gpu-b200 network-config (gpu0..gpu7 after Netplan renames).
+{% for nic in roce_underlays %}
+  - >-
+    rdma link show rxe_{{ nic.name }} > /dev/null 2>&1 ||
+    rdma link add rxe_{{ nic.name }} type rxe netdev {{ nic.name }} || true
+{% endfor %}

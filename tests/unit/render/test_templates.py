@@ -15,7 +15,8 @@ Why this is a unit test, not a renderer integration test:
 
 from __future__ import annotations
 
-from typing import Any
+from collections.abc import Callable
+from typing import Any, ClassVar
 
 import pytest
 import yaml
@@ -27,7 +28,12 @@ from host_config.render import TEMPLATES_ROOT, make_environment
 # Re-use the validated intent factories from the intent tests rather
 # than rebuilding fixtures here. If those factories drift, this file
 # drifts with them — desirable.
-from tests.unit.models.test_intent import make_b300_intent, make_cpu_intent
+from tests.unit.models.test_intent import (
+    make_b200_intent,
+    make_b300_intent,
+    make_cpu_intent,
+    make_h200_intent,
+)
 
 
 def _render(role: str, name: str, intent: HostIntent) -> str:
@@ -60,7 +66,7 @@ class TestTemplateTreeShape:
     """
 
     @pytest.mark.fast
-    @pytest.mark.parametrize("role", ["cpu", "gpu-b300"])
+    @pytest.mark.parametrize("role", ["cpu", "gpu-b300", "gpu-b200", "gpu-h200"])
     @pytest.mark.parametrize("name", ["meta-data.j2", "user-data.j2", "network-config.j2"])
     def test_template_file_exists(self, role: str, name: str) -> None:
         """Each (role, file) pair exists under templates/."""
@@ -201,6 +207,83 @@ class TestGpuB300Templates:
             assert entry["addresses"] == [str(nic.address)]
 
 
+class TestGpuB200Templates:
+    """gpu-b200 mirrors gpu-b300 (RoCE) — verify it renders and keeps the shape."""
+
+    @pytest.mark.fast
+    def test_user_data_parses_and_has_soft_roce(self) -> None:
+        intent = make_b200_intent()
+        out = _render("gpu-b200", "user-data.j2", intent)
+        assert out.splitlines()[0] == "#cloud-config"
+        parsed = yaml.safe_load(out)
+        runcmd = " ".join(str(c) for c in parsed["runcmd"])
+        assert "modprobe rdma_rxe" in runcmd
+        assert "rdma link add" in runcmd
+
+    @pytest.mark.fast
+    def test_network_config_has_all_roce_underlays(self) -> None:
+        intent = make_b200_intent()
+        out = _render("gpu-b200", "network-config.j2", intent)
+        parsed = yaml.safe_load(out)["network"]
+        expected = {"nsa", "nsb"} | {f"gpu{i}" for i in range(8)}
+        assert set(parsed["ethernets"].keys()) == expected
+        for nic in intent.roce_underlays:
+            assert parsed["ethernets"][nic.name]["virtual-function-count"] == nic.sriov_vfs
+
+
+class TestGpuH200Templates:
+    """gpu-h200 (InfiniBand) — IPoIB rails, no RoCE/rdma_rxe, IB module load."""
+
+    @pytest.mark.fast
+    def test_meta_data_renders_and_parses(self) -> None:
+        intent = make_h200_intent()
+        out = _render("gpu-h200", "meta-data.j2", intent)
+        parsed = yaml.safe_load(out)
+        assert parsed["instance-id"] == intent.asset_tag
+        assert parsed["local-hostname"] == intent.hostname
+
+    @pytest.mark.fast
+    def test_user_data_parses_and_is_cloud_config(self) -> None:
+        intent = make_h200_intent()
+        out = _render("gpu-h200", "user-data.j2", intent)
+        assert out.splitlines()[0] == "#cloud-config"
+        yaml.safe_load(out)  # must parse — assertion is the lack of exception
+
+    @pytest.mark.fast
+    def test_user_data_loads_ib_stack_not_soft_roce(self) -> None:
+        """H200 loads the InfiniBand stack and never uses Soft-RoCE (rdma_rxe)."""
+        intent = make_h200_intent()
+        out = _render("gpu-h200", "user-data.j2", intent)
+        parsed = yaml.safe_load(out)
+        runcmd = " ".join(str(c) for c in parsed["runcmd"])
+        # IB modules loaded; no Soft-RoCE substrate and no rxe device creation.
+        assert "modprobe ib_ipoib" in runcmd
+        assert "modprobe mlx5_ib" in runcmd
+        assert "rdma_rxe" not in runcmd
+        assert "rdma link add" not in runcmd
+        # The modules-load.d drop-in is written so the stack persists across boots.
+        modfile = next(
+            f for f in parsed["write_files"] if f["path"].endswith("infiniband.conf")
+        )
+        assert "ib_ipoib" in modfile["content"]
+
+    @pytest.mark.fast
+    def test_network_config_has_ipoib_rails_without_sriov(self) -> None:
+        """All 8 IB rails appear as IPoIB ethernets (MTU 2044, addressed, no VF count)."""
+        intent = make_h200_intent()
+        out = _render("gpu-h200", "network-config.j2", intent)
+        parsed = yaml.safe_load(out)["network"]
+        expected = {"nsa", "nsb"} | {f"ib{i}" for i in range(8)}
+        assert set(parsed["ethernets"].keys()) == expected
+        for nic in intent.ib_underlays:
+            entry = parsed["ethernets"][nic.name]
+            assert entry["match"]["macaddress"] == nic.mac
+            assert entry["mtu"] == 2044
+            assert entry["addresses"] == [str(nic.address)]
+            # InfiniBand has native RDMA — no Netplan SR-IOV.
+            assert "virtual-function-count" not in entry
+
+
 # ---------------------------------------------------------------------------
 # Strictness: undefined vars raise, not silently render empty.
 # ---------------------------------------------------------------------------
@@ -250,14 +333,18 @@ class TestDeterminism:
         gate would flap.
     """
 
+    _FACTORIES: ClassVar[dict[str, Callable[[], HostIntent]]] = {
+        "cpu": make_cpu_intent,
+        "gpu-b300": make_b300_intent,
+        "gpu-b200": make_b200_intent,
+        "gpu-h200": make_h200_intent,
+    }
+
     @pytest.mark.fast
-    @pytest.mark.parametrize(
-        ("role", "factory_name"),
-        [("cpu", "cpu"), ("gpu-b300", "b300")],
-    )
+    @pytest.mark.parametrize("role", ["cpu", "gpu-b300", "gpu-b200", "gpu-h200"])
     @pytest.mark.parametrize("name", ["meta-data.j2", "user-data.j2", "network-config.j2"])
-    def test_render_is_byte_stable(self, role: str, factory_name: str, name: str) -> None:
-        intent = make_cpu_intent() if factory_name == "cpu" else make_b300_intent()
+    def test_render_is_byte_stable(self, role: str, name: str) -> None:
+        intent = self._FACTORIES[role]()
         first = _render(role, name, intent)
         second = _render(role, name, intent)
         assert first == second

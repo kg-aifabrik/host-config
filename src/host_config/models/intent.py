@@ -17,11 +17,17 @@ from typing import Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from host_config.models.interface import Bond, BondMember, RoceUnderlay
+from host_config.models.interface import (
+    Bond,
+    BondMember,
+    InfinibandUnderlay,
+    RoceUnderlay,
+)
 from host_config.models.validators import (
     check_bond_references_ns_nics,
     check_default_gateway_on_mgmt,
     check_exactly_one_default_gateway,
+    check_ib_count_for_role,
     check_mtu_monotone,
     check_ns_nic_count,
     check_roce_count_for_role,
@@ -37,8 +43,13 @@ class Role(StrEnum):
     """Supported host roles.
 
     `cpu` covers K8s control-plane nodes, jumphosts, bootstrap appliances
-    — anything with the N-S subsystem only. `gpu-b300` adds the east-west
-    subsystem (8 RoCE NICs).
+    — anything with the N-S subsystem only. The GPU roles add an east-west
+    subsystem of 8 backend NICs:
+
+    - `gpu-b300` / `gpu-b200`: 8 RoCE-over-Ethernet underlays (ConnectX),
+      Soft-RoCE substrate in the lab.
+    - `gpu-h200`: 8 InfiniBand IPoIB underlays (native HCA RDMA, no
+      Soft-RoCE).
 
     New roles arrive via ADR; the renderer learns about them by adding
     a template directory under `src/host_config/render/templates/<role>/`.
@@ -46,6 +57,8 @@ class Role(StrEnum):
 
     CPU = "cpu"
     GPU_B300 = "gpu-b300"
+    GPU_B200 = "gpu-b200"
+    GPU_H200 = "gpu-h200"
 
 
 class HostIntent(BaseModel):
@@ -86,7 +99,11 @@ class HostIntent(BaseModel):
     ns_nics: list[BondMember]
     bond: Bond
     vlans: list[VlanChild]
+    # East-west backend NICs. A host carries one kind or the other (never
+    # both): RoCE roles populate roce_underlays, the InfiniBand role
+    # populates ib_underlays. The role-count invariants enforce the split.
     roce_underlays: list[RoceUnderlay] = Field(default_factory=list)
+    ib_underlays: list[InfinibandUnderlay] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def _check_invariants(self) -> Self:
@@ -103,8 +120,9 @@ class HostIntent(BaseModel):
         check_default_gateway_on_mgmt(self.vlans)
         check_mtu_monotone(self.bond, self.vlans)
         check_roce_count_for_role(self.role.value, self.roce_underlays)
-        check_unique_names(self.ns_nics, self.roce_underlays, self.vlans)
-        check_unique_ips(self.vlans, self.roce_underlays)
+        check_ib_count_for_role(self.role.value, self.ib_underlays)
+        check_unique_names(self.ns_nics, self.roce_underlays, self.vlans, self.ib_underlays)
+        check_unique_ips(self.vlans, self.roce_underlays, self.ib_underlays)
         return self
 
 

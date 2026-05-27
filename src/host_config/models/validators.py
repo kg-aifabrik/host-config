@@ -16,15 +16,34 @@ from collections import Counter
 from collections.abc import Iterable
 
 from host_config.models.errors import InvariantError
-from host_config.models.interface import Bond, BondMember, RoceUnderlay
+from host_config.models.interface import (
+    Bond,
+    BondMember,
+    InfinibandUnderlay,
+    RoceUnderlay,
+)
 from host_config.models.vlan import VlanChild, VlanRole
 
-# Expected counts per role. These are first-class constants so the
-# invariant code reads cleanly and `ruff PLR2004` doesn't fire on
-# bare integer comparisons.
+# Expected counts per role. First-class constants so the invariant code
+# reads cleanly and `ruff PLR2004` doesn't fire on bare integer comparisons.
 EXPECTED_NS_NIC_COUNT = 2
-EXPECTED_GPU_B300_ROCE_COUNT = 8
-EXPECTED_CPU_ROCE_COUNT = 0
+
+# East-west underlay counts per role. A role's expected count is looked up
+# here; roles absent from a map default to 0. RoCE roles (gpu-b300/b200)
+# carry 8 Ethernet underlays; the InfiniBand role (gpu-h200) carries 8 IPoIB
+# underlays and zero RoCE. cpu carries neither.
+_ROCE_COUNT_BY_ROLE: dict[str, int] = {
+    "cpu": 0,
+    "gpu-b300": 8,
+    "gpu-b200": 8,
+    "gpu-h200": 0,
+}
+_IB_COUNT_BY_ROLE: dict[str, int] = {
+    "cpu": 0,
+    "gpu-b300": 0,
+    "gpu-b200": 0,
+    "gpu-h200": 8,
+}
 
 
 def check_ns_nic_count(ns_nics: list[BondMember]) -> None:
@@ -234,48 +253,81 @@ def check_roce_count_for_role(role: str, roce: list[RoceUnderlay]) -> None:
     """RoCE underlay count matches the host role.
 
     Approach:
-        - cpu role: must have zero RoCE underlays.
-        - gpu-b300 role: must have exactly 8 (one per GPU).
+        Looks the expected count up in ``_ROCE_COUNT_BY_ROLE`` (default 0):
+        - cpu / gpu-h200: zero RoCE underlays.
+        - gpu-b300 / gpu-b200: exactly 8 (one per GPU).
 
     Args:
         role: The host role string (`Role.value`).
         roce: The RoCE underlay list from the intent.
 
     Raises:
-        InvariantError("roce-count-cpu"): cpu role with non-zero count.
-        InvariantError("roce-count-gpu-b300"): gpu-b300 role with count != 8.
+        InvariantError("roce-count-<role>"): when the count for that role
+            differs from the expected value (e.g. "roce-count-cpu",
+            "roce-count-gpu-b300", "roce-count-gpu-b200").
 
     Scenarios:
-        - cpu + 0 RoCE → no raise.
-        - cpu + 1 RoCE → raises.
-        - gpu-b300 + 8 RoCE → no raise.
-        - gpu-b300 + 7 RoCE → raises.
-        - gpu-b300 + 0 RoCE → raises.
+        - cpu + 0 RoCE → no raise; cpu + 1 RoCE → raises.
+        - gpu-b300 + 8 RoCE → no raise; gpu-b300 + 7 → raises.
+        - gpu-b200 + 8 RoCE → no raise; gpu-b200 + 0 → raises.
+        - gpu-h200 + 0 RoCE → no raise; gpu-h200 + 8 RoCE → raises.
     """
-    if role == "cpu" and len(roce) != EXPECTED_CPU_ROCE_COUNT:
+    expected = _ROCE_COUNT_BY_ROLE.get(role, 0)
+    if len(roce) != expected:
         raise InvariantError(
-            "roce-count-cpu",
-            f"cpu hosts have no east-west NICs, got {len(roce)} RoCE underlays",
-        )
-    if role == "gpu-b300" and len(roce) != EXPECTED_GPU_B300_ROCE_COUNT:
-        raise InvariantError(
-            "roce-count-gpu-b300",
-            f"gpu-b300 hosts require exactly {EXPECTED_GPU_B300_ROCE_COUNT} RoCE "
-            f"underlays (one per GPU), got {len(roce)}",
+            f"roce-count-{role}",
+            f"{role} hosts require exactly {expected} RoCE underlay(s), "
+            f"got {len(roce)}",
         )
 
 
-def check_unique_ips(vlans: list[VlanChild], roce: list[RoceUnderlay]) -> None:
+def check_ib_count_for_role(role: str, ib: list[InfinibandUnderlay]) -> None:
+    """InfiniBand (IPoIB) underlay count matches the host role.
+
+    Approach:
+        Looks the expected count up in ``_IB_COUNT_BY_ROLE`` (default 0):
+        - gpu-h200: exactly 8 (one IPoIB rail per GPU).
+        - all other roles: zero.
+
+    Args:
+        role: The host role string (`Role.value`).
+        ib: The InfiniBand underlay list from the intent.
+
+    Raises:
+        InvariantError("ib-count-<role>"): when the count for that role
+            differs from the expected value (e.g. "ib-count-gpu-h200",
+            "ib-count-cpu", "ib-count-gpu-b300").
+
+    Scenarios:
+        - gpu-h200 + 8 IB → no raise; gpu-h200 + 7 → raises.
+        - cpu + 0 IB → no raise; cpu + 1 IB → raises.
+        - gpu-b300 + 1 IB → raises (RoCE role must carry no IPoIB rails).
+    """
+    expected = _IB_COUNT_BY_ROLE.get(role, 0)
+    if len(ib) != expected:
+        raise InvariantError(
+            f"ib-count-{role}",
+            f"{role} hosts require exactly {expected} InfiniBand underlay(s), "
+            f"got {len(ib)}",
+        )
+
+
+def check_unique_ips(
+    vlans: list[VlanChild],
+    roce: list[RoceUnderlay],
+    ib: list[InfinibandUnderlay],
+) -> None:
     """No two interfaces on the host share an IP address.
 
     Approach:
-        Aggregates every IP allocated across VLAN children and RoCE
-        underlays; raises if any address (ignoring prefix) appears more
-        than once.
+        Aggregates every IP allocated across VLAN children, RoCE underlays,
+        and InfiniBand underlays; raises if any address (ignoring prefix)
+        appears more than once.
 
     Args:
         vlans: The host's VLAN children.
-        roce: The host's RoCE underlays.
+        roce: The host's RoCE underlays (Ethernet east-west).
+        ib: The host's InfiniBand underlays (IPoIB east-west).
 
     Raises:
         InvariantError("duplicate-ip"): when any IP is declared twice.
@@ -283,40 +335,41 @@ def check_unique_ips(vlans: list[VlanChild], roce: list[RoceUnderlay]) -> None:
     Scenarios:
         - All IPs distinct → no raise.
         - mgmt VLAN and storage VLAN share an IP → raises.
-        - gpu0 and gpu1 share an underlay IP → raises.
+        - gpu0 and gpu1 (or ib0 and ib1) share an underlay IP → raises.
     """
     seen: dict[str, str] = {}
-    for v in vlans:
-        ip = str(v.address.ip)
+    addressed = (
+        *((str(v.address.ip), v.name) for v in vlans),
+        *((str(r.address.ip), r.name) for r in roce),
+        *((str(i.address.ip), i.name) for i in ib),
+    )
+    for ip, name in addressed:
         if ip in seen:
             raise InvariantError(
                 "duplicate-ip",
-                f"IP {ip} appears on both {seen[ip]!r} and {v.name!r}",
+                f"IP {ip} appears on both {seen[ip]!r} and {name!r}",
             )
-        seen[ip] = v.name
-    for r in roce:
-        ip = str(r.address.ip)
-        if ip in seen:
-            raise InvariantError(
-                "duplicate-ip",
-                f"IP {ip} appears on both {seen[ip]!r} and {r.name!r}",
-            )
-        seen[ip] = r.name
+        seen[ip] = name
 
 
 def check_unique_names(
-    ns_nics: list[BondMember], roce: list[RoceUnderlay], vlans: list[VlanChild]
+    ns_nics: list[BondMember],
+    roce: list[RoceUnderlay],
+    vlans: list[VlanChild],
+    ib: list[InfinibandUnderlay],
 ) -> None:
     """Every interface name in the host is distinct.
 
     Approach:
-        Collects names across N-S NICs, RoCE NICs, and VLAN children.
-        Names must be globally unique — they map 1:1 to kernel netdevs.
+        Collects names across N-S NICs, RoCE NICs, InfiniBand NICs, and
+        VLAN children. Names must be globally unique — they map 1:1 to
+        kernel netdevs.
 
     Args:
         ns_nics: N-S NIC list.
         roce: RoCE NIC list.
         vlans: VLAN child list.
+        ib: InfiniBand NIC list.
 
     Raises:
         InvariantError("duplicate-name"): when any name repeats.
@@ -329,6 +382,7 @@ def check_unique_names(
     names: Iterable[str] = (
         *(n.name for n in ns_nics),
         *(r.name for r in roce),
+        *(i.name for i in ib),
         *(v.name for v in vlans),
     )
     counts = Counter(names)
@@ -344,6 +398,7 @@ __all__ = [
     "check_bond_references_ns_nics",
     "check_default_gateway_on_mgmt",
     "check_exactly_one_default_gateway",
+    "check_ib_count_for_role",
     "check_mtu_monotone",
     "check_ns_nic_count",
     "check_roce_count_for_role",
