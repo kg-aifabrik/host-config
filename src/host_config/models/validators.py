@@ -276,8 +276,7 @@ def check_roce_count_for_role(role: str, roce: list[RoceUnderlay]) -> None:
     if len(roce) != expected:
         raise InvariantError(
             f"roce-count-{role}",
-            f"{role} hosts require exactly {expected} RoCE underlay(s), "
-            f"got {len(roce)}",
+            f"{role} hosts require exactly {expected} RoCE underlay(s), got {len(roce)}",
         )
 
 
@@ -307,8 +306,7 @@ def check_ib_count_for_role(role: str, ib: list[InfinibandUnderlay]) -> None:
     if len(ib) != expected:
         raise InvariantError(
             f"ib-count-{role}",
-            f"{role} hosts require exactly {expected} InfiniBand underlay(s), "
-            f"got {len(ib)}",
+            f"{role} hosts require exactly {expected} InfiniBand underlay(s), got {len(ib)}",
         )
 
 

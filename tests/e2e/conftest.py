@@ -111,10 +111,7 @@ def e2e_skip_reason() -> str | None:  # noqa: PLR0911
         return f"nginx-cache not reachable at {seed_url}"
     image_path = Path(_env("E2E_IMAGE_PATH", str(_DEFAULT_IMAGE_PATH)))
     if not image_path.exists():
-        return (
-            f"Cloud image not found at {image_path} — "
-            "run: python -m fixtures.vms.prepare_image"
-        )
+        return f"Cloud image not found at {image_path} — run: python -m fixtures.vms.prepare_image"
     return None
 
 

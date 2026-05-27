@@ -409,53 +409,66 @@ def build_cmdline(
     # (mgmt0) — a second SLIRP NIC loses its IP after cloud-init applies
     # the networkd config.
     slirp_opts = (
-        f"user,id=mgmt0"
-        f"{_slirp_guestfwd_suffix(seed_server)}"
-        f"{_slirp_hostfwd_suffix(ssh_host_port)}"
+        f"user,id=mgmt0{_slirp_guestfwd_suffix(seed_server)}{_slirp_hostfwd_suffix(ssh_host_port)}"
     )
 
     cmd: list[str] = [
         "qemu-system-x86_64",
         "-enable-kvm",
-        "-m", str(memory_mib),
-        "-smp", str(vcpus),
-        "-cpu", "host",
+        "-m",
+        str(memory_mib),
+        "-smp",
+        str(vcpus),
+        "-cpu",
+        "host",
         # Disk image (copy-on-write from base image).
-        "-drive", f"file={image_path},format=qcow2,if=virtio,snapshot=on",
+        "-drive",
+        f"file={image_path},format=qcow2,if=virtio,snapshot=on",
         # SMBIOS type=1: serial = NoCloud-net seed URL.
         # ds-identify (a systemd generator) scans this field for "ds=nocloud"
         # to decide whether to enable cloud-init before any services start.
         # Without this, cloud-init-generator disables cloud-init entirely.
-        "-smbios", f"type=1,serial=ds=nocloud-net;s={seed_url}",
+        "-smbios",
+        f"type=1,serial=ds=nocloud-net;s={seed_url}",
         # SMBIOS type=3: asset = asset_tag for external identification.
-        "-smbios", f"type=3,asset={asset_tag}",
+        "-smbios",
+        f"type=3,asset={asset_tag}",
         # NIC 0: SLIRP (user-mode) for out-of-band test-runner access.
         # guestfwd (if present) allows cloud-init to reach the host's
         # seed server via the 10.0.2.100 virtual SLIRP address.
         # Does not go through the OVS bridge.
-        "-netdev", slirp_opts,
-        "-device", "virtio-net-pci,netdev=mgmt0",
+        "-netdev",
+        slirp_opts,
+        "-device",
+        "virtio-net-pci,netdev=mgmt0",
         # NIC 1: nsa — wired to the OVS bridge via tap.
-        "-netdev", f"tap,id=nsa0,ifname={tap_nsa},script=no,downscript=no",
-        "-device", f"virtio-net-pci,netdev=nsa0,mac={nsa_mac}",
+        "-netdev",
+        f"tap,id=nsa0,ifname={tap_nsa},script=no,downscript=no",
+        "-device",
+        f"virtio-net-pci,netdev=nsa0,mac={nsa_mac}",
         # NIC 2: nsb — wired to the OVS bridge via tap.
-        "-netdev", f"tap,id=nsb0,ifname={tap_nsb},script=no,downscript=no",
-        "-device", f"virtio-net-pci,netdev=nsb0,mac={nsb_mac}",
+        "-netdev",
+        f"tap,id=nsb0,ifname={tap_nsb},script=no,downscript=no",
+        "-device",
+        f"virtio-net-pci,netdev=nsb0,mac={nsb_mac}",
     ]
 
     # NICs 3..N: E-W RoCE underlay NICs (B300 shape only).
     # Each uses its own tap interface — no VLAN trunk, independent L3 underlay.
-    for nic_name, mac, tap in (roce_nics or []):
+    for nic_name, mac, tap in roce_nics or []:
         netdev_id = f"{nic_name}0"
         cmd += [
-            "-netdev", f"tap,id={netdev_id},ifname={tap},script=no,downscript=no",
-            "-device", f"virtio-net-pci,netdev={netdev_id},mac={mac}",
+            "-netdev",
+            f"tap,id={netdev_id},ifname={tap},script=no,downscript=no",
+            "-device",
+            f"virtio-net-pci,netdev={netdev_id},mac={mac}",
         ]
 
     cmd += [
         # Suppress display output (headless); use serial console via extra_args
         # if a console is needed.
-        "-display", "none",
+        "-display",
+        "none",
     ]
 
     if extra_args:

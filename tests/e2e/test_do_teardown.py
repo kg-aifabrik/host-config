@@ -89,18 +89,25 @@ def _do_resource_counts() -> dict[str, int]:
     queries = [
         (
             "droplets",
-            ["doctl", "compute", "droplet", "list",
-             "--tag-name", _DO_TAG, "--format", "ID", "--no-header"],
+            [
+                "doctl",
+                "compute",
+                "droplet",
+                "list",
+                "--tag-name",
+                _DO_TAG,
+                "--format",
+                "ID",
+                "--no-header",
+            ],
         ),
         (
             "volumes",
-            ["doctl", "compute", "volume", "list",
-             "--format", "ID", "--no-header"],
+            ["doctl", "compute", "volume", "list", "--format", "ID", "--no-header"],
         ),
         (
             "snapshots",
-            ["doctl", "compute", "snapshot", "list",
-             "--format", "ID", "--no-header"],
+            ["doctl", "compute", "snapshot", "list", "--format", "ID", "--no-header"],
         ),
     ]
     for resource_type, cmd in queries:
@@ -190,9 +197,7 @@ class TestDOTrapOnFailure:
             known-good baseline.
         """
         result = _run_just("lab-down")
-        assert result.returncode == 0, (
-            f"just lab-down did not exit 0:\nstdout: {result.stdout}"
-        )
+        assert result.returncode == 0, f"just lab-down did not exit 0:\nstdout: {result.stdout}"
         _assert_zero_resources()
 
     def test_multiple_lab_down_calls_are_idempotent(self) -> None:

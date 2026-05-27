@@ -212,9 +212,7 @@ def _intents_strategy() -> st.SearchStrategy[HostIntent]:
     @st.composite
     def _build(draw: st.DrawFn) -> HostIntent:
         factory = draw(
-            st.sampled_from(
-                [make_cpu_intent, make_b300_intent, make_b200_intent, make_h200_intent]
-            )
+            st.sampled_from([make_cpu_intent, make_b300_intent, make_b200_intent, make_h200_intent])
         )
         intent = factory()
         seed = draw(st.integers(min_value=0, max_value=10_000))

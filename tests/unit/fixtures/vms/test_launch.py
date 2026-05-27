@@ -204,8 +204,7 @@ class TestBuildCmdlineB300:
 
     # 8 E-W NICs: (nic_name, mac, tap_iface)
     _ROCE_NICS: ClassVar[list[tuple[str, str, str]]] = [
-        (f"gpu{i}", f"aa:bb:cc:00:00:{0x10 + i:02x}", f"tap-gpu{i}")
-        for i in range(8)
+        (f"gpu{i}", f"aa:bb:cc:00:00:{0x10 + i:02x}", f"tap-gpu{i}") for i in range(8)
     ]
 
     def _b300_cmdline(self, **overrides: object) -> list[str]:

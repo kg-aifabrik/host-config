@@ -56,10 +56,14 @@ _POLL_INTERVAL_S = 10
 _SSH_HOST_PORT = 2223
 
 _SSH_OPTS = [
-    "-o", "StrictHostKeyChecking=no",
-    "-o", "UserKnownHostsFile=/dev/null",
-    "-o", "BatchMode=yes",
-    "-o", "ConnectTimeout=5",
+    "-o",
+    "StrictHostKeyChecking=no",
+    "-o",
+    "UserKnownHostsFile=/dev/null",
+    "-o",
+    "BatchMode=yes",
+    "-o",
+    "ConnectTimeout=5",
 ]
 
 # rping timeout (seconds) — local loopback-ish paths are fast.
@@ -93,7 +97,8 @@ def b300_vm(
         # a second SLIRP NIC.
         ssh_host_port=_SSH_HOST_PORT,
         extra_qemu_args=[
-            "-serial", "file:/tmp/b300-boot.log",
+            "-serial",
+            "file:/tmp/b300-boot.log",
         ],
     )
 
@@ -121,8 +126,10 @@ def _ssh(
         [  # noqa: S607
             "ssh",
             *_SSH_OPTS,
-            "-i", str(ssh_key_path),
-            "-p", str(port),
+            "-i",
+            str(ssh_key_path),
+            "-p",
+            str(port),
             "ubuntu@127.0.0.1",
             cmd,
         ],
@@ -132,9 +139,7 @@ def _ssh(
     )
 
 
-def _wait_for_cloud_init(
-    ssh_key_path: Path, *, timeout: int = _CLOUD_INIT_TIMEOUT_S
-) -> None:
+def _wait_for_cloud_init(ssh_key_path: Path, *, timeout: int = _CLOUD_INIT_TIMEOUT_S) -> None:
     """Poll until cloud-init finishes or timeout elapses.
 
     Accepts exit codes 0 (success) and 2 (done with recoverable errors).
@@ -182,9 +187,7 @@ class TestB300HostBoot:
         rdma_rxe may not be installed — both produce degraded, not error.
         """
         result = _ssh(ssh_key_path, "cloud-init status", check=False)
-        assert "done" in result.stdout.lower(), (
-            f"cloud-init status unexpected: {result.stdout!r}"
-        )
+        assert "done" in result.stdout.lower(), f"cloud-init status unexpected: {result.stdout!r}"
 
     def test_bond0_up(self, b300_vm: VMHandle, ssh_key_path: Path) -> None:
         """bond0 is UP."""
@@ -216,9 +219,7 @@ class TestB300HostBoot:
         """RoCE NICs have MTU 9000."""
         for i in range(8):
             result = _ssh(ssh_key_path, f"ip link show gpu{i}")
-            assert "mtu 9000" in result.stdout, (
-                f"gpu{i} expected mtu 9000:\n{result.stdout}"
-            )
+            assert "mtu 9000" in result.stdout, f"gpu{i} expected mtu 9000:\n{result.stdout}"
 
     def test_roce_nics_have_correct_ips(self, b300_vm: VMHandle, ssh_key_path: Path) -> None:
         """Each RoCE NIC has its per-NIC IP (10.42.100+i.23/24)."""

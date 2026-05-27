@@ -45,9 +45,7 @@ logger = structlog.get_logger(__name__)
 
 # Official Ubuntu cloud-image mirror.  The SHA256SUMS file lives alongside
 # the image and is the authoritative source for checksum values.
-_BASE_URL: Final = (
-    "https://cloud-images.ubuntu.com/noble/current"
-)
+_BASE_URL: Final = "https://cloud-images.ubuntu.com/noble/current"
 _IMAGE_FILENAME: Final = "noble-server-cloudimg-amd64.img"
 _SHASUMS_FILENAME: Final = "SHA256SUMS"
 
@@ -99,9 +97,7 @@ class ChecksumMismatchError(ImagePrepError):
         self.path = path
         self.expected = expected
         self.actual = actual
-        super().__init__(
-            f"SHA256 mismatch for {path}: expected {expected!r}, got {actual!r}"
-        )
+        super().__init__(f"SHA256 mismatch for {path}: expected {expected!r}, got {actual!r}")
 
 
 class NetworkError(ImagePrepError):
@@ -131,9 +127,7 @@ class VirtCustomizeError(ImagePrepError):
         self.image_path = image_path
         self.returncode = returncode
         self.stderr = stderr
-        super().__init__(
-            f"virt-customize failed (rc={returncode}) on {image_path}: {stderr[:200]}"
-        )
+        super().__init__(f"virt-customize failed (rc={returncode}) on {image_path}: {stderr[:200]}")
 
 
 # ---------------------------------------------------------------------------
@@ -311,9 +305,12 @@ def _run_virt_customize(image_path: Path) -> None:
     install_arg = ",".join(_CUSTOMIZE_PACKAGES)
     cmd = [
         "virt-customize",
-        "-a", str(image_path),
-        "--install", install_arg,
-        "--run-command", "apt-get clean",
+        "-a",
+        str(image_path),
+        "--install",
+        install_arg,
+        "--run-command",
+        "apt-get clean",
     ]
 
     # Inject the e2e SSH public key via cloud.cfg.d so cloud-init merges it
@@ -342,7 +339,7 @@ def _run_virt_customize(image_path: Path) -> None:
         logger.warning(
             "image.ssh_key_missing",
             pubkey=str(_E2E_SSH_PUBKEY),
-            msg="e2e SSH public key not found; VM SSH will require cloud-init user-data to set keys",
+            msg="e2e SSH public key not found; VM SSH needs cloud-init user-data to set keys",
         )
 
     logger.info(
@@ -368,9 +365,11 @@ def _run_virt_customize(image_path: Path) -> None:
             error=result.stderr[:400],
             msg="virt-customize --install failed; retrying without packages",
         )
-        cmd_no_install = [c for i, c in enumerate(cmd)
-                          if c not in {"--install", install_arg}
-                          and not (i > 0 and cmd[i - 1] == "--install")]
+        cmd_no_install = [
+            c
+            for i, c in enumerate(cmd)
+            if c not in {"--install", install_arg} and not (i > 0 and cmd[i - 1] == "--install")
+        ]
         result = subprocess.run(  # noqa: S603
             cmd_no_install,
             capture_output=True,

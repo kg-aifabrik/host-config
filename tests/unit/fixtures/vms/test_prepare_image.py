@@ -37,10 +37,7 @@ class TestExtractSha256:
 
     @pytest.mark.fast
     def test_extracts_correct_digest(self) -> None:
-        content = (
-            "abc123  noble-server-cloudimg-amd64.img\n"
-            "def456  other-file.img\n"
-        )
+        content = "abc123  noble-server-cloudimg-amd64.img\ndef456  other-file.img\n"
         assert _extract_sha256(content, "noble-server-cloudimg-amd64.img") == "abc123"
 
     @pytest.mark.fast
@@ -128,10 +125,13 @@ class TestPrepare:
     def test_raises_network_error_on_download_failure(self, tmp_path: Path) -> None:
         """NetworkError propagates when fetch_text fails."""
         img_out = tmp_path / "ubuntu.img"
-        with patch(
-            "fixtures.vms.prepare_image._fetch_text",
-            side_effect=NetworkError("http://x", ConnectionError("refused")),
-        ), pytest.raises(NetworkError):
+        with (
+            patch(
+                "fixtures.vms.prepare_image._fetch_text",
+                side_effect=NetworkError("http://x", ConnectionError("refused")),
+            ),
+            pytest.raises(NetworkError),
+        ):
             prepare(out_path=img_out)
 
     @pytest.mark.fast

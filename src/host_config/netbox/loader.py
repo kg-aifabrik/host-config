@@ -339,9 +339,7 @@ def _build_ib_underlays(
         mtu = _read_mtu(iface, asset_tag, default=2044)
         address = _fetch_single_ip(client, iface, asset_tag)
 
-        underlays.append(
-            InfinibandUnderlay(name=iface.name, mac=mac, mtu=mtu, address=address)
-        )
+        underlays.append(InfinibandUnderlay(name=iface.name, mac=mac, mtu=mtu, address=address))
     # Sort by name so ib0..ib7 ordering is stable for golden-file tests.
     underlays.sort(key=lambda u: u.name)
     return underlays

@@ -220,16 +220,25 @@ def _build_h200_mock_client() -> MagicMock:
         _make_interface(iface_id=11, name="nsb", mac="aa:bb:cc:00:02:02", mtu=9000),
         _make_interface(iface_id=12, name="bond0", mtu=9000),
         _make_interface(
-            iface_id=13, name="bond0.100", mtu=1500,
-            untagged_vlan_vid=100, untagged_vlan_name="mgmt",
+            iface_id=13,
+            name="bond0.100",
+            mtu=1500,
+            untagged_vlan_vid=100,
+            untagged_vlan_name="mgmt",
         ),
         _make_interface(
-            iface_id=14, name="bond0.200", mtu=9000,
-            untagged_vlan_vid=200, untagged_vlan_name="storage",
+            iface_id=14,
+            name="bond0.200",
+            mtu=9000,
+            untagged_vlan_vid=200,
+            untagged_vlan_name="storage",
         ),
         _make_interface(
-            iface_id=15, name="bond0.300", mtu=1500,
-            untagged_vlan_vid=300, untagged_vlan_name="ingress",
+            iface_id=15,
+            name="bond0.300",
+            mtu=1500,
+            untagged_vlan_vid=300,
+            untagged_vlan_name="ingress",
         ),
     ]
     ib_ifaces = [

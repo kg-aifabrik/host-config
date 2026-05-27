@@ -56,10 +56,14 @@ _SSH_HOST_PORT = 2222
 
 # SSH options for non-interactive test access.
 _SSH_OPTS = [
-    "-o", "StrictHostKeyChecking=no",
-    "-o", "UserKnownHostsFile=/dev/null",
-    "-o", "BatchMode=yes",
-    "-o", "ConnectTimeout=5",
+    "-o",
+    "StrictHostKeyChecking=no",
+    "-o",
+    "UserKnownHostsFile=/dev/null",
+    "-o",
+    "BatchMode=yes",
+    "-o",
+    "ConnectTimeout=5",
 ]
 
 
@@ -98,7 +102,8 @@ def cpu_vm(
         # network config, causing the banner exchange to time out.
         ssh_host_port=_SSH_HOST_PORT,
         extra_qemu_args=[
-            "-serial", "file:/tmp/cpu-boot.log",
+            "-serial",
+            "file:/tmp/cpu-boot.log",
         ],
     )
 
@@ -136,8 +141,10 @@ def _ssh(
         [  # noqa: S607
             "ssh",
             *_SSH_OPTS,
-            "-i", str(ssh_key_path),
-            "-p", str(port),
+            "-i",
+            str(ssh_key_path),
+            "-p",
+            str(port),
             "ubuntu@127.0.0.1",
             cmd,
         ],
@@ -204,9 +211,7 @@ class TestCpuHostBoot:
         LACP bond won't negotiate without a real switch peer.
         """
         result = _ssh(ssh_key_path, "cloud-init status", check=False)
-        assert "done" in result.stdout.lower(), (
-            f"cloud-init status unexpected: {result.stdout!r}"
-        )
+        assert "done" in result.stdout.lower(), f"cloud-init status unexpected: {result.stdout!r}"
 
     def test_bond0_exists_and_is_up(self, cpu_vm: VMHandle, ssh_key_path: Path) -> None:
         """bond0 interface exists and is in UP state."""
@@ -231,9 +236,7 @@ class TestCpuHostBoot:
             "cat /sys/class/net/bond0/bonding/mode",
         )
         # Linux bonding reports "802.3ad 4" for LACP.
-        assert "802.3ad" in result.stdout or "4" in result.stdout, (
-            f"bond0 mode: {result.stdout!r}"
-        )
+        assert "802.3ad" in result.stdout or "4" in result.stdout, f"bond0 mode: {result.stdout!r}"
 
     def test_vlan100_up_with_correct_ip(self, cpu_vm: VMHandle, ssh_key_path: Path) -> None:
         """bond0.100 (mgmt VLAN) is up with IP 10.42.10.11/24."""
@@ -246,9 +249,7 @@ class TestCpuHostBoot:
     def test_vlan100_mtu_is_1500(self, cpu_vm: VMHandle, ssh_key_path: Path) -> None:
         """bond0.100 MTU is 1500 (mgmt VLAN)."""
         result = _ssh(ssh_key_path, "ip link show bond0.100")
-        assert "mtu 1500" in result.stdout, (
-            f"Expected mtu 1500 on bond0.100:\n{result.stdout}"
-        )
+        assert "mtu 1500" in result.stdout, f"Expected mtu 1500 on bond0.100:\n{result.stdout}"
 
     def test_vlan200_up_with_correct_ip(self, cpu_vm: VMHandle, ssh_key_path: Path) -> None:
         """bond0.200 (storage VLAN) is up with IP 10.42.20.11/24."""
@@ -261,9 +262,7 @@ class TestCpuHostBoot:
     def test_vlan200_mtu_is_9000(self, cpu_vm: VMHandle, ssh_key_path: Path) -> None:
         """bond0.200 MTU is 9000 (storage VLAN, jumbo frames)."""
         result = _ssh(ssh_key_path, "ip link show bond0.200")
-        assert "mtu 9000" in result.stdout, (
-            f"Expected mtu 9000 on bond0.200:\n{result.stdout}"
-        )
+        assert "mtu 9000" in result.stdout, f"Expected mtu 9000 on bond0.200:\n{result.stdout}"
 
     def test_vlan300_up_with_correct_ip(self, cpu_vm: VMHandle, ssh_key_path: Path) -> None:
         """bond0.300 (ingress VLAN) is up with IP 10.42.30.11/24."""
@@ -283,13 +282,9 @@ class TestCpuHostBoot:
     def test_nsa_in_bond0(self, cpu_vm: VMHandle, ssh_key_path: Path) -> None:
         """nsa is enslaved to bond0."""
         result = _ssh(ssh_key_path, "ip link show nsa")
-        assert "master bond0" in result.stdout, (
-            f"Expected nsa to be master bond0:\n{result.stdout}"
-        )
+        assert "master bond0" in result.stdout, f"Expected nsa to be master bond0:\n{result.stdout}"
 
     def test_nsb_in_bond0(self, cpu_vm: VMHandle, ssh_key_path: Path) -> None:
         """nsb is enslaved to bond0."""
         result = _ssh(ssh_key_path, "ip link show nsb")
-        assert "master bond0" in result.stdout, (
-            f"Expected nsb to be master bond0:\n{result.stdout}"
-        )
+        assert "master bond0" in result.stdout, f"Expected nsb to be master bond0:\n{result.stdout}"

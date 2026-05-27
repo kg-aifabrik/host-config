@@ -262,9 +262,7 @@ class TestGpuH200Templates:
         assert "rdma_rxe" not in runcmd
         assert "rdma link add" not in runcmd
         # The modules-load.d drop-in is written so the stack persists across boots.
-        modfile = next(
-            f for f in parsed["write_files"] if f["path"].endswith("infiniband.conf")
-        )
+        modfile = next(f for f in parsed["write_files"] if f["path"].endswith("infiniband.conf"))
         assert "ib_ipoib" in modfile["content"]
 
     @pytest.mark.fast

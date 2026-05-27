@@ -79,7 +79,18 @@ def _safe_gauge(name: str, doc: str) -> Gauge:
 # (tens of ms) + Jinja render (sub-ms). Default Prometheus buckets
 # under-resolve the 1-50 ms band we care about.
 _LATENCY_BUCKETS: tuple[float, ...] = (
-    0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0,
+    0.001,
+    0.005,
+    0.01,
+    0.025,
+    0.05,
+    0.1,
+    0.25,
+    0.5,
+    1.0,
+    2.5,
+    5.0,
+    10.0,
 )
 
 # ---------------------------------------------------------------------------

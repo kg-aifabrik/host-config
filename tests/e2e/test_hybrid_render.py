@@ -224,8 +224,9 @@ class TestNetboxDownResilience:
             # left with a downed dependency.
             deadline = time.monotonic() + 180
             while time.monotonic() < deadline:
-                if _reachable(seed_url) and requests.get(
-                    f"{seed_url}/readyz", timeout=_TIMEOUT
-                ).status_code == 200:
+                if (
+                    _reachable(seed_url)
+                    and requests.get(f"{seed_url}/readyz", timeout=_TIMEOUT).status_code == 200
+                ):
                     break
                 time.sleep(3)

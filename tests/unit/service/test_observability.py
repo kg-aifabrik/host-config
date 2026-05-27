@@ -85,9 +85,7 @@ class TestTraceability:
     """A single render request emits the ordered story §7.5 demands."""
 
     @pytest.mark.fast
-    def test_successful_render_emits_ordered_events(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_successful_render_emits_ordered_events(self, monkeypatch: pytest.MonkeyPatch) -> None:
         # §7.5 is explicitly "with LOG_LEVEL=DEBUG": the granular
         # netbox/template/render lines are DEBUG, so the filtering bound
         # logger must admit DEBUG. make_app() reads LOG_LEVEL at build time.
@@ -114,16 +112,12 @@ class TestTraceability:
             "request.completed",
         ]
         positions = [events.index(e) for e in expected_order if e in events]
-        assert positions == sorted(positions), (
-            f"events out of order: {events}"
-        )
+        assert positions == sorted(positions), f"events out of order: {events}"
         for e in expected_order:
             assert e in events, f"missing required log event: {e!r}"
 
     @pytest.mark.fast
-    def test_key_fields_present_for_reconstruction(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_key_fields_present_for_reconstruction(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("LOG_LEVEL", "DEBUG")
         intent = make_cpu_intent()
         client = _build_client(loader_result=intent)
@@ -179,9 +173,7 @@ class TestMetrics:
         client = _build_client(loader_result=exc)
         resp = client.get("/v1/render/SN-X/meta-data")
         assert resp.status_code == 502
-        after = _metric(
-            "host_config_renders_total", {"role": "unknown", "outcome": "netbox_error"}
-        )
+        after = _metric("host_config_renders_total", {"role": "unknown", "outcome": "netbox_error"})
         assert after == before + 1
 
     @pytest.mark.fast
@@ -192,9 +184,7 @@ class TestMetrics:
         client = _build_client(loader_result=HostNotFoundError("SN-MISSING"))
         resp = client.get("/v1/render/SN-MISSING/meta-data")
         assert resp.status_code == 404
-        after = _metric(
-            "host_config_renders_total", {"role": "unknown", "outcome": "netbox_error"}
-        )
+        after = _metric("host_config_renders_total", {"role": "unknown", "outcome": "netbox_error"})
         assert after == before + 1
 
     @pytest.mark.fast
