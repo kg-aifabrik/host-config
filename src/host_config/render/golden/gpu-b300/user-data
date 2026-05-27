@@ -194,3 +194,14 @@ runcmd:
   - >-
     rdma link show rxe_gpu7 > /dev/null 2>&1 ||
     rdma link add rxe_gpu7 type rxe netdev gpu7 || true
+  # Pin every RoCE device to RoCEv2 (routable, UDP/4791) — the mode NCCL/UCX
+  # use — rather than leaving it to the kernel default. configfs + rdma_cm
+  # based; best-effort (|| true) so a lab kernel without the rdma_cm configfs
+  # doesn't fail the boot. Iterates the real rxe_* devices so it stays correct
+  # regardless of how many came up.
+  - modprobe rdma_cm || true
+  - >-
+    for d in $(ls /sys/class/infiniband 2>/dev/null | grep '^rxe_'); do
+    mkdir -p /sys/kernel/config/rdma_cm/$d 2>/dev/null || true;
+    echo 'RoCE v2' > /sys/kernel/config/rdma_cm/$d/ports/1/default_roce_mode 2>/dev/null || true;
+    done

@@ -10,8 +10,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Two GPU roles — `gpu-b200` and `gpu-h200` (ADR-0013). `gpu-b200` mirrors
-  `gpu-b300` (8 RoCE-over-Ethernet underlays, Soft-RoCE in the lab) as a
-  distinct role/template tree so the B-series platforms can diverge later.
+  `gpu-b300`: both B-series roles run **RoCEv2** (Soft-RoCE in the lab,
+  hardware RoCE in production) and now pin each rxe device's rdma_cm
+  `default_roce_mode` to `RoCE v2` rather than relying on the kernel
+  default. A distinct role/template tree lets the B-series diverge later.
   `gpu-h200` is the first **InfiniBand** role: a new `InfinibandUnderlay`
   model + `ib_underlays` field carry 8 IPoIB rails (ib0..ib7, MTU 2044, one
   /24 each); the gpu-h200 template loads the IB stack (mlx5_ib/ib_ipoib/…)

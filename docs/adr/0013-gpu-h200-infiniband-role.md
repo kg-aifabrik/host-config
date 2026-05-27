@@ -28,8 +28,12 @@ GPU roles.
 Add two roles to `Role`: `gpu-b200` and `gpu-h200`.
 
 - **gpu-b200** reuses the existing `RoceUnderlay` model and a template tree
-  that mirrors `gpu-b300` (Soft-RoCE bring-up). The role-count invariant
-  requires exactly 8 RoCE underlays.
+  that mirrors `gpu-b300`. Both B-series roles run **RoCEv2** (routable,
+  UDP/4791): the template creates the rxe devices (Soft-RoCE in the lab,
+  hardware RoCE on ConnectX in production) and pins each device's rdma_cm
+  `default_roce_mode` to `RoCE v2` so the transport is unambiguous rather
+  than dependent on the kernel default. The role-count invariant requires
+  exactly 8 RoCE underlays.
 - **gpu-h200** introduces a new `InfinibandUnderlay` interface model and a
   new `ib_underlays` field on `HostIntent`. A host carries one east-west
   kind or the other, never both; the `check_roce_count_for_role` /
